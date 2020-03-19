@@ -245,7 +245,7 @@ class UCCSD(Ansatz):
             list_excitation_operators = [
                 (self._hopping_ops[index % num_excitations], parameters[index])
                 for index in range(self._depth * num_excitations)]
-            blockwise_parameters = [[p] for p in parameters]
+            blockwise_parameters = [[[p]] for p in parameters]
         else:
             list_excitation_operators = []
             counter = 0
@@ -254,7 +254,7 @@ class UCCSD(Ansatz):
                     list_excitation_operators.append((self._hopping_ops[counter],
                                                       parameters[i]))
                     counter += 1
-                    blockwise_parameters += [[parameters[i]]]
+                    blockwise_parameters += [[[parameters[i]]]]
 
         results = parallel_map(UCCSD._construct_circuit_for_one_excited_operator,
                                list_excitation_operators,

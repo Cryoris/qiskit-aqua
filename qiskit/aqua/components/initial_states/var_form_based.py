@@ -16,8 +16,8 @@
 
 from typing import Union, List
 import numpy as np
-from qiskit.aqua import AquaError
-from qiskit.aqua.components.ansatzes import Ansatz
+from qiskit.aqua.aqua_error import AquaError
+from qiskit.aqua.components.ansatzes.ansatz import Ansatz
 
 
 class VarFormBased:

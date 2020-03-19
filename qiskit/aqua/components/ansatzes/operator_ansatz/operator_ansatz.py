@@ -19,10 +19,10 @@ from typing import Union, List, Optional
 from qiskit.circuit import Instruction, Parameter
 from qiskit.tools import parallel_map
 
-from qiskit.aqua import aqua_globals
+from qiskit.aqua.aqua_globals import aqua_globals
 from qiskit.aqua.operators import BaseOperator
-from qiskit.aqua.components.ansatzes import Ansatz
 from qiskit.aqua.operators.op_converter import to_weighted_pauli_operator
+from ..ansatz import Ansatz
 
 
 class OperatorAnsatz(Ansatz):

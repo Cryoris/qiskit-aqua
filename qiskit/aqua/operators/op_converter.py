@@ -25,7 +25,8 @@ from qiskit.quantum_info import Pauli
 from qiskit.tools.parallel import parallel_map
 from qiskit.tools.events import TextProgressBar
 
-from qiskit.aqua import AquaError, aqua_globals
+from qiskit.aqua.aqua_error import AquaError
+from qiskit.aqua.aqua_globals import aqua_globals
 from .weighted_pauli_operator import WeightedPauliOperator
 from .matrix_operator import MatrixOperator
 from .tpb_grouped_weighted_pauli_operator import TPBGroupedWeightedPauliOperator

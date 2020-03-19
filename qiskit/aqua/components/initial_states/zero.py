@@ -17,9 +17,9 @@
 import numpy as np
 from qiskit import QuantumRegister, QuantumCircuit
 
-from qiskit.aqua import AquaError
-from qiskit.aqua.components.initial_states import InitialState
+from qiskit.aqua.aqua_error import AquaError
 from qiskit.aqua.utils.validation import validate_min
+from .initial_state import InitialState
 
 
 class Zero(InitialState):

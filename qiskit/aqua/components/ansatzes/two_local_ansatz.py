@@ -205,6 +205,8 @@ class TwoLocalAnsatz(Ansatz):
                     # add the gate
                     circuit.extend(sub_circuit)
 
+        print('entanglement layer')
+        print(circuit.draw())
         return circuit.to_gate()
 
     def _get_rotation_layer(self, block_num: int) -> Gate:
@@ -341,6 +343,7 @@ class TwoLocalAnsatz(Ansatz):
 
         if self.entanglement_gates is None:
             raise ValueError('No entanglement gates are specified.')
+        print('entanglement gates', self.entanglement_gates)
 
         blocks = []
         self._param_count = 0
@@ -354,6 +357,7 @@ class TwoLocalAnsatz(Ansatz):
 
             # append an entanglement layer, if entanglement gates are specified
             if len(self._entanglement_gates) > 0:
+                print('adding entangler block')
                 block = self._get_entanglement_layer(block_num)
                 blocks += [block]
 

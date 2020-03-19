@@ -196,26 +196,36 @@ class Ansatz:
         else:
             raise TypeError('Adding a {} to an Ansatz is not supported.'.format(type(layer)))
 
-    def _parametrize_block(self, block: Instruction, qargs: List[int],
+    def _parametrize_block(self, block: Instruction,
                            params: Optional[List[Parameter]]) -> QuantumCircuit:
         """Convert ``block`` to a circuit of correct width and parameterized with the
         specified parameters.
 
         Args:
             block: The instruction to which the base parameters are bound.
-            qargs: The indices for the block.
             params: The parameters to bind to the block.
 
         Returns:
             The block as circuit of width ``self.num_qubits`` where the parameters have been
             substituted as specified.
         """
-        circuit = QuantumCircuit(self.num_qubits)
-        circuit.append(block, qargs)
+        circuit = QuantumCircuit(block.num_qubits)
+        circuit.append(block, list(range(block.num_qubits)))
         if params is not None and self._overwrite_block_parameters:
             update = dict(zip(circuit.parameters, params))
             circuit = circuit.copy()
             circuit._substitute_parameters(update)
+
+        return circuit
+
+    def _build_layer(self, block: Instruction, qargs: List[List[int]],
+                     params: List[List[Parameter]]) -> QuantumCircuit:
+        """Build a layer."""
+        circuit = QuantumCircuit(self.num_qubits)
+        for qarg, param in zip(qargs, params):
+            # substitute block
+            parametrized_block = self._parametrize_block(block, param)
+            circuit.append(parametrized_block.to_instruction(), qarg)
 
         return circuit
 
@@ -242,8 +252,9 @@ class Ansatz:
             raise ValueError('The blocks are not set.')
 
         # check the compatibility of the attributes
-        if len(self.qubit_indices) != len(self._blocks):
-            raise ValueError('The number of qubit indices does not match the number of blocks.')
+        if len(self.qubit_indices) != len(self._reps_as_list()):
+            raise ValueError('The number of qubit indices does not match the number of '
+                             'repetitions.')
 
         if isinstance(self._reps, list):
             if len(self._reps) > 0:
@@ -257,10 +268,11 @@ class Ansatz:
                                      + '({})'.format(len(self._blockwise_base_params)))
 
         if self._num_qubits:
-            for qubit_indices in self.qubit_indices:
-                if max(qubit_indices) >= self._num_qubits:
-                    raise ValueError('The manually set number of qubits is too small for the '
-                                     + 'blocks in the circuit.')
+            for layer in self.qubit_indices:
+                for block in layer:
+                    if max(block) >= self._num_qubits:
+                        raise ValueError('The manually set number of qubits is too small for the '
+                                         + 'blocks in the circuit.')
 
         return True
 
@@ -322,8 +334,9 @@ class Ansatz:
             return self._base_params
 
         base_params = []
-        for block in self.blockwise_parameters:
-            combine_parameterlists(base_params, block, duplicate_existing=False)
+        for layer in self.blockwise_parameters:
+            for block in layer:
+                combine_parameterlists(base_params, block, duplicate_existing=False)
 
         return base_params
 
@@ -367,8 +380,12 @@ class Ansatz:
 
         Returns:
             The qubit indices specifying the qubits each block acts on.
+
+        TODO handle 'full' or 'linear' as qarg
         """
-        return self._qargs or [list(range(block.num_qubits)) for block in self._blocks]
+        if self._qargs:
+            return self._qargs
+        return [[list(range(self.blocks[i].num_qubits))] for i in self._reps_as_list()]
 
     @qubit_indices.setter
     def qubit_indices(self, indices: List[List[int]]) -> None:
@@ -482,7 +499,10 @@ class Ansatz:
         # get the maximum number of qubits from the qubit indices
         if self._num_qubits is None:
             if len(self.qubit_indices) > 0:
-                return 1 + max(max(qarg) for qarg in self.qubit_indices)
+                flattened_indices = [i for layer in self.qubit_indices
+                                     for block in layer
+                                     for i in block]
+                return 1 + max(flattened_indices)
             return 0
 
         return int(self._num_qubits)
@@ -632,7 +652,7 @@ class Ansatz:
         return self._default_parameters[start:start + num]
 
     @property
-    def blockwise_parameters(self) -> Union[List[List[Parameter]]]:
+    def blockwise_parameters(self) -> List[List[List[Parameter]]]:
         """Get the parameters of the Ansatz.
 
         Only the so-called "surface parameters" of the Ansatz are subject to change, these
@@ -649,20 +669,32 @@ class Ansatz:
         blockwise_base_params = []
         if self._overwrite_block_parameters is True:
             param_count = 0
+            # for applied block i in layer
             for i in self._reps_as_list():
-                n = len(get_parameters(self.blocks[i]))
-                replacement_parameters = self._get_default_parameters(param_count, n)
-                param_count += n
-                blockwise_base_params += [replacement_parameters]
+                n = len(get_parameters(self.blocks[i]))  # num parameters of the block
+                idcs = self.qubit_indices[i]  # qubits indices where this block get's applied
+                n_applied = len(idcs)  # number of times the block is applied
+                layer_params = []
+                for _ in range(n_applied):
+                    replacement_parameters = self._get_default_parameters(param_count, n)
+                    param_count += n
+                    layer_params += [replacement_parameters]
+                blockwise_base_params += [layer_params]
         else:
             for i in self._reps_as_list():
                 block_params = get_parameters(self.blocks[i])
-                blockwise_base_params += [block_params]
+                idcs = self.qubit_indices[i]  # qubits indices where this block get's applied
+                n_applied = len(idcs)  # number of times the block is applied
+                layer_params = []
+                for _ in range(n_applied):
+                    layer_params += [block_params]
+                blockwise_base_params += [layer_params]
 
+        print('bbp', blockwise_base_params)
         return blockwise_base_params
 
     @blockwise_parameters.setter
-    def blockwise_parameters(self, params: List[List[Parameter]]) -> None:
+    def blockwise_parameters(self, params: List[List[List[Parameter]]]) -> None:
         """Set the parameters of the Ansatz.
 
         This sets the surface parameters, not the base parameters.
@@ -702,7 +734,7 @@ class Ansatz:
 
         # define the the qubit indices
         if qubit_indices:
-            self.qubit_indices = self.qubit_indices + [qubit_indices]
+            self.qubit_indices = self.qubit_indices + [[qubit_indices]]
             num_qubits = max(qubit_indices)
         else:
             num_qubits = block.num_qubits
@@ -728,7 +760,7 @@ class Ansatz:
 
             block, qargs = self.blocks[-1], self.qubit_indices[-1]
             params = self.blockwise_parameters[-1]
-            self._circuit.extend(self._parametrize_block(block, qargs, params))
+            self._circuit.extend(self._build_layer(block, qargs, params))
 
         return self
 
@@ -777,7 +809,7 @@ class Ansatz:
 
         Raises:
             ValueError: If the qubit register is provided but the length does not coincide with the
-                number of qubits of the Ansatz.
+               number of qubits of the Ansatz.
         """
         self.parameters = params
         if q is None:
@@ -807,25 +839,19 @@ class Ansatz:
             else:
                 # use the initial state circuit if it is not None
                 if self._initial_state:
-                    circuit = self._initial_state.construct_circuit(mode='circuit')
+                    circuit = self._initial_state.construct_circuit('circuit')
                 else:
                     circuit = QuantumCircuit(self.num_qubits)
 
                 # add the blocks, if they are specified
                 if len(self._reps_as_list()) > 0:
-                    blockwise_parameters = self.blockwise_parameters
-                    # the first block (separately so barriers can be inserted in the for-loop)
-                    param_idx, i = 0, self._reps_as_list()[0]
-                    block, qargs = self.blocks[i], self.qubit_indices[i]
-                    params = blockwise_parameters[param_idx]
-                    circuit.extend(self._parametrize_block(block, qargs, params))
-
-                    for param_idx, i in enumerate(self._reps_as_list()[1:]):
-                        if self._insert_barriers:
+                    for i, j in enumerate(self._reps_as_list()):
+                        if self._insert_barriers and i > 0:
                             circuit.barrier()
-                        block, qargs = self.blocks[i], self.qubit_indices[i]
-                        params = blockwise_parameters[param_idx + 1]
-                        circuit.extend(self._parametrize_block(block, qargs, params))
+                        block = self.blocks[j]
+                        idcs = self.qubit_indices[i]
+                        params = self.blockwise_parameters[i]
+                        circuit.extend(self._build_layer(block, idcs, params))
 
             # store the circuit
             self._circuit = circuit
