@@ -45,7 +45,7 @@ class Ansatz:
     def __init__(self,
                  blocks: Optional[Union[QuantumCircuit, List[QuantumCircuit],
                                         Instruction, List[Instruction]]] = None,
-                 qubit_indices: Optional[Union[List[int], List[List[int]]]] = None,
+                 entanglement: Optional[Union[List[int], List[List[int]]]] = None,
                  reps: Optional[Union[int, List[int]]] = None,
                  insert_barriers: bool = False,
                  parameter_prefix: str = 'θ',
@@ -66,7 +66,7 @@ class Ansatz:
 
         Args:
             blocks: The input blocks. Can be a single gate, a list of gates, (or circuits?)
-            qubit_indices: The indices specifying on which qubits the input blocks act. If None, for
+            entanglement: The indices specifying on which qubits the input blocks act. If None, for
                 each block this is set to the first ``n`` qubits, where ``n`` is the number of
                 qubits the block acts on.
             reps: Specifies how the input blocks are repeated. If an integer, all input blocks
@@ -109,8 +109,10 @@ class Ansatz:
         self._reps = None
         self.reps = reps or 1
 
-        # get qubit_indices in the right format (i.e. list of lists)
-        self.qubit_indices = qubit_indices
+        # get entanglement in the right format (i.e. list of lists)
+        self._entanglement, self._entangler_maps = None, None
+        self.entanglement = entanglement
+        # self._entangler_maps = None
 
         # set the initial state
         self._initial_state, self._initial_state_circuit = None, None
@@ -218,14 +220,14 @@ class Ansatz:
 
         return circuit
 
-    def _build_layer(self, block: Instruction, qargs: List[List[int]],
+    def _build_layer(self, block: Instruction, entangler_map: List[List[int]],
                      params: List[List[Parameter]]) -> QuantumCircuit:
         """Build a layer."""
         circuit = QuantumCircuit(self.num_qubits)
-        for qarg, param in zip(qargs, params):
+        for idcs, param in zip(entangler_map, params):
             # substitute block
             parametrized_block = self._parametrize_block(block, param)
-            circuit.append(parametrized_block.to_instruction(), qarg)
+            circuit.append(parametrized_block.to_instruction(), idcs)
 
         return circuit
 
@@ -252,7 +254,7 @@ class Ansatz:
             raise ValueError('The blocks are not set.')
 
         # check the compatibility of the attributes
-        if len(self.qubit_indices) != len(self._reps_as_list()):
+        if len(self.entangler_maps) != len(self._reps_as_list()):
             raise ValueError('The number of qubit indices does not match the number of '
                              'repetitions.')
 
@@ -268,7 +270,7 @@ class Ansatz:
                                      + '({})'.format(len(self._blockwise_base_params)))
 
         if self._num_qubits:
-            for layer in self.qubit_indices:
+            for layer in self.entangler_maps:
                 for block in layer:
                     if max(block) >= self._num_qubits:
                         raise ValueError('The manually set number of qubits is too small for the '
@@ -375,7 +377,7 @@ class Ansatz:
         self._blocks = [self._convert_to_block(block) for block in blocks]
 
     @property
-    def qubit_indices(self) -> List[List[int]]:
+    def entangler_maps(self) -> List[List[int]]:
         """The qubit indices each block acts on.
 
         Returns:
@@ -383,20 +385,56 @@ class Ansatz:
 
         TODO handle 'full' or 'linear' as qarg
         """
-        if self._qargs:
-            return self._qargs
+        if self._entangler_maps:
+            return self._entangler_maps
         return [[list(range(self.blocks[i].num_qubits))] for i in self._reps_as_list()]
 
+    @property
+    def entanglement(self):
+        """Get the entanglement strategy."""
+        return self._entanglement
+
+    @entanglement.setter
+    def entanglement(self, entanglement):
+        """Set the entanglement strategy."""
+        # TODO set entangler maps correctly
+        self._entanglement = entanglement
+        if entanglement is None:
+            self.entangler_maps = None
+        elif isinstance(entanglement, str):
+            raise NotImplementedError('Setting by str not currently supported.')
+        elif isinstance(entanglement, list):
+            if all(isinstance(e, str) for e in entanglement):
+                raise NotImplementedError('Setting by List[str] not currently supported.')
+            if all(isinstance(e, list) for e in entanglement): # is List[List[?]]
+                if all(isinstance(e_i, int) for e in entanglement for e_i in e):
+                    raise NotImplementedError('Setting by List[List[int]] not yet supported.')
+                if all(isinstance(e_i, list) for e in entanglement for e_i in e):
+                    if all(isinstance(e_j, int) for e in entanglement for e_i in e for e_j in e_i):
+                        self.entangler_maps = entanglement
+        else:
+            raise NotImplementedError('Unsupported format, {}'.format(entanglement))
+
+    @property
+    def qubit_indices(self):
+        warnings.warn('Deprecated, use entangler_maps getter')
+        return self.entangler_maps
+
     @qubit_indices.setter
-    def qubit_indices(self, indices: List[List[int]]) -> None:
+    def qubit_indices(self, indicies):
+        warnings.warn('Deprecated, use entangler_maps setter')
+        self.entangler_maps = indicies
+
+    @entangler_maps.setter
+    def entangler_maps(self, indices: List[List[int]]) -> None:
         """Set the qubit indices per block.
 
         Args:
             The qubit indices specifying on which qubits each block acts on.
         """
-        self._qargs = indices
+        self._entangler_maps = indices
 
-        # TODO check if indices is the same if qargs, only then invalidate the definition
+        # TODO check if indices is the same if s, only then invalidate the definition
         # but this setter is probably not really used anywhere except the initializer anyways
         self._circuit = None
 
@@ -498,8 +536,8 @@ class Ansatz:
         """
         # get the maximum number of qubits from the qubit indices
         if self._num_qubits is None:
-            if len(self.qubit_indices) > 0:
-                flattened_indices = [i for layer in self.qubit_indices
+            if len(self.entangler_maps) > 0:
+                flattened_indices = [i for layer in self.entangler_maps
                                      for block in layer
                                      for i in block]
                 return 1 + max(flattened_indices)
@@ -672,7 +710,7 @@ class Ansatz:
             # for applied block i in layer
             for i in self._reps_as_list():
                 n = len(get_parameters(self.blocks[i]))  # num parameters of the block
-                idcs = self.qubit_indices[i]  # qubits indices where this block get's applied
+                idcs = self.entangler_maps[i]  # qubits indices where this block get's applied
                 n_applied = len(idcs)  # number of times the block is applied
                 layer_params = []
                 for _ in range(n_applied):
@@ -683,14 +721,13 @@ class Ansatz:
         else:
             for i in self._reps_as_list():
                 block_params = get_parameters(self.blocks[i])
-                idcs = self.qubit_indices[i]  # qubits indices where this block get's applied
+                idcs = self.entangler_maps[i]  # qubits indices where this block get's applied
                 n_applied = len(idcs)  # number of times the block is applied
                 layer_params = []
                 for _ in range(n_applied):
                     layer_params += [block_params]
                 blockwise_base_params += [layer_params]
 
-        print('bbp', blockwise_base_params)
         return blockwise_base_params
 
     @blockwise_parameters.setter
@@ -712,14 +749,14 @@ class Ansatz:
 
     def append(self,
                other: Union[Ansatz, Instruction, QuantumCircuit],
-               qubit_indices: Optional[List[int]] = None
+               entangler_maps: Optional[List[int]] = None
                ) -> Ansatz:
         """Append another layer to the Ansatz.
 
         Args:
             other: The layer to append, can be another Ansatz, an Instruction or Gate,
                 or a QuantumCircuit.
-            qubit_indices: The qubit indices where to append the layer to.
+            entangler_maps: The qubit indices where to append the layer to.
                 Defaults to the first `n` qubits, where `n` is the number of qubits the layer acts
                 on.
 
@@ -733,9 +770,9 @@ class Ansatz:
         block = self._convert_to_block(other)
 
         # define the the qubit indices
-        if qubit_indices:
-            self.qubit_indices = self.qubit_indices + [[qubit_indices]]
-            num_qubits = max(qubit_indices)
+        if entangler_maps:
+            self.entangler_maps = self.entangler_maps + [[entangler_maps]]
+            num_qubits = max(entangler_maps)
         else:
             num_qubits = block.num_qubits
 
@@ -758,9 +795,9 @@ class Ansatz:
             if self._insert_barriers and len(self._reps_as_list()) > 1:
                 self._circuit.barrier()
 
-            block, qargs = self.blocks[-1], self.qubit_indices[-1]
+            block, entangler_map = self.blocks[-1], self.entangler_maps[-1]
             params = self.blockwise_parameters[-1]
-            self._circuit.extend(self._build_layer(block, qargs, params))
+            self._circuit.extend(self._build_layer(block, entangler_map, params))
 
         return self
 
@@ -849,7 +886,7 @@ class Ansatz:
                         if self._insert_barriers and i > 0:
                             circuit.barrier()
                         block = self.blocks[j]
-                        idcs = self.qubit_indices[i]
+                        idcs = self.entangler_maps[i]
                         params = self.blockwise_parameters[i]
                         circuit.extend(self._build_layer(block, idcs, params))
 

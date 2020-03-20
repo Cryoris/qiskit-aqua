@@ -33,7 +33,7 @@ class OperatorAnsatz(Ansatz):
 
     def __init__(self,
                  operators: Union[BaseOperator, List[BaseOperator]],
-                 qubit_indices: Optional[Union[List[int], List[List[int]]]] = None,
+                 entanglement: Optional[Union[List[int], List[List[int]]]] = None,
                  parameter_prefix: str = '_',
                  use_basis_gates: bool = False,
                  insert_barriers: bool = False) -> None:
@@ -50,7 +50,7 @@ class OperatorAnsatz(Ansatz):
 
         Args:
             operators: An operator (or list of) to specify the evolution instructions.
-            qubit_indices: The indices where the evolution instruction should be inserted.
+            entanglement: The indices where the evolution instruction should be inserted.
                 Defaults to 0, ..., n - 1, where n is the number of qubits the operator acts on.
             parameter_prefix: The parameter prefix used for the default parameters.
                 Defaults to '_'.
@@ -70,7 +70,7 @@ class OperatorAnsatz(Ansatz):
         evolution_layers = self._get_evolution_layers(operators, params)
 
         super().__init__(blocks=evolution_layers,
-                         qubit_indices=qubit_indices,
+                         entanglement=entanglement,
                          insert_barriers=insert_barriers)
 
     def _get_single_evolution_layer(self, operator_param_pair):

@@ -39,8 +39,8 @@ from qiskit.aqua.components.ansatzes import Ansatz
 # pylint:disable=invalid-overridden-method
 
 
-class TwoLocalAnsatz(Ansatz):
-    """The two-local gate Ansatz.
+class NLocalCircuit(Ansatz):
+    """The N-local gate Ansatz.
 
     TODO
     """
@@ -48,8 +48,8 @@ class TwoLocalAnsatz(Ansatz):
     def __init__(self,
                  num_qubits: Optional[int] = None,
                  depth: int = 3,
-                 rotation_gates: Optional[Union[str, List[str], type, List[type]]] = None,
-                 entanglement_gates: Optional[Union[str, List[str], type, List[type]]] = None,
+                 rotation_gates: Optional[Union[QuantumCircuit, List[QuantumCircuit]]] = None,
+                 entanglement_gates: Optional[Union[QuantumCircuit, List[QuantumCircuit]]] = None,
                  entanglement: Union[str, List[List[int]], Callable[[int], List[int]]] = 'full',
                  initial_state: Optional[InitialState] = None,
                  skip_unentangled_qubits: bool = False,
@@ -63,20 +63,13 @@ class TwoLocalAnsatz(Ansatz):
             num_qubits: The number of qubits of the Ansatz.
             depth: Specifies how often a block of consisting of a rotation layer and entanglement
                 layer is repeated.
-            rotation_gates: The gates used in the rotation layer. Can be specified via the name of
-                a gate (e.g. 'ry') or the gate type itself (e.g. RYGate).
-                If only one gate is provided, the gate same gate is applied to each qubit.
-                If a list of gates is provided, all gates are applied to each qubit in the provided
-                order.
-                See the Examples section for more detail.
-            entanglement_gates: The gates used in the entanglement layer. Can be specified in
-                the same format as `rotation_gates`.
+            rotation_gates: The single qubit gates used in the rotation layer.
+            entanglement_gates: The multi-qubit gates used in the entanglement layer.
             entanglement: Specifies the entanglement structure. Can be a string ('full', 'linear'
                 or 'sca'), a list of integer-pairs specifying the indices of qubits
                 entangled with one another, or a callable returning such a list provided with
                 the index of the entanglement layer.
                 Default to 'full' entanglement.
-                See the Examples section for more detail.
             initial_state: An `InitialState` object to prepend to the Ansatz.
                 TODO deprecate this feature in favor of prepend or overloading __add__ in
                 the initial state class
@@ -90,53 +83,6 @@ class TwoLocalAnsatz(Ansatz):
                 number of its occurrence with this specified prefix.
             insert_barriers: If True, barriers are inserted in between each layer. If False,
                 no barriers are inserted. Defaults to False.
-
-        Examples:
-            >>> ansatz = TwoLocalAnsatz(3, 'ry', 'cx', 'linear', reps=2, insert_barriers=True)
-            >>> qc = QuantumCircuit(3)  # create a circuit and append the Ansatz
-            >>> qc += ansatz.to_circuit()
-            >>> qc.decompose().draw()  # decompose the layers into standard gates
-                    ┌────────┐ ░            ░ ┌────────┐ ░            ░ ┌────────┐
-            q_0: |0>┤ Ry(θ0) ├─░───■────────░─┤ Ry(θ3) ├─░───■────────░─┤ Ry(θ6) ├
-                    ├────────┤ ░ ┌─┴─┐      ░ ├────────┤ ░ ┌─┴─┐      ░ ├────────┤
-            q_1: |0>┤ Ry(θ1) ├─░─┤ X ├──■───░─┤ Ry(θ4) ├─░─┤ X ├──■───░─┤ Ry(θ7) ├
-                    ├────────┤ ░ └───┘┌─┴─┐ ░ ├────────┤ ░ └───┘┌─┴─┐ ░ ├────────┤
-            q_2: |0>┤ Ry(θ2) ├─░──────┤ X ├─░─┤ Ry(θ5) ├─░──────┤ X ├─░─┤ Ry(θ8) ├
-                    └────────┘ ░      └───┘ ░ └────────┘ ░      └───┘ ░ └────────┘
-
-            >>> ansatz = TwoLocalAnsatz(3, ['ry', 'rz'], 'cz', 'full', reps=1, insert_barriers=True)
-            >>> print(ansatz)  # quick way of plotting the Ansatz
-                    ┌────────┐┌────────┐ ░           ░  ┌────────┐ ┌────────┐
-            q_0: |0>┤ Ry(θ0) ├┤ Rz(θ1) ├─░──■──■─────░──┤ Ry(θ6) ├─┤ Rz(θ7) ├
-                    ├────────┤├────────┤ ░  │  │     ░  ├────────┤ ├────────┤
-            q_1: |0>┤ Ry(θ2) ├┤ Rz(θ3) ├─░──■──┼──■──░──┤ Ry(θ8) ├─┤ Rz(θ9) ├
-                    ├────────┤├────────┤ ░     │  │  ░ ┌┴────────┤┌┴────────┤
-            q_2: |0>┤ Ry(θ4) ├┤ Rz(θ5) ├─░─────■──■──░─┤ Ry(θ10) ├┤ Rz(θ11) ├
-                    └────────┘└────────┘ ░           ░ └─────────┘└─────────┘
-
-            >>> entangler_map = [[0, 1], [1, 2], [2, 0]]  # circular entanglement for 3 qubits
-            >>> ansatz = TwoLocalAnsatz(3, 'x', 'crx', entangler_map, reps=1)
-            >>> print(ansatz)  # note: no barriers inserted this time!
-                    ┌───┐                         ┌────────┐┌───┐
-            q_0: |0>┤ X ├────■────────────────────┤ Rx(θ2) ├┤ X ├
-                    ├───┤┌───┴────┐          ┌───┐└───┬────┘└───┘
-            q_1: |0>┤ X ├┤ Rx(θ0) ├────■─────┤ X ├────┼──────────
-                    ├───┤└────────┘┌───┴────┐└───┘    │     ┌───┐
-            q_2: |0>┤ X ├──────────┤ Rx(θ1) ├─────────■─────┤ X ├
-                    └───┘          └────────┘               └───┘
-
-            >>> entangler_map = [[0, 3], [0, 2]]  # entangle the first and last two-way
-            >>> ansatz = TwoLocalAnsatz(4, [], 'cry', entangler_map, reps=1)
-            >>> circuit = ansatz.to_circuit() + ansatz.to_circuit()  # add two Ansatzes
-            >>> circuit.decompose().draw()  # note, that the parameters are the same!
-            q_0: |0>────■─────────■─────────■─────────■─────
-                        │         │         │         │
-            q_1: |0>────┼─────────┼─────────┼─────────┼─────
-                        │     ┌───┴────┐    │     ┌───┴────┐
-            q_2: |0>────┼─────┤ Ry(θ1) ├────┼─────┤ Ry(θ1) ├
-                    ┌───┴────┐└────────┘┌───┴────┐└────────┘
-            q_3: |0>┤ Ry(θ0) ├──────────┤ Ry(θ0) ├──────────
-                    └────────┘          └────────┘
         """
         # initialize Ansatz
         super().__init__(insert_barriers=insert_barriers, initial_state=initial_state)
@@ -475,7 +421,7 @@ class TwoLocalAnsatz(Ansatz):
             list[tuple]: the single qubit gate(s) as tuples (QuantumCircuit.gate, num_parameters),
                 e.g. (QuantumCircuit.cx, 0) or (QuantumCircuit.cry, 1)
         """
-        gate_param_list = [TwoLocalAnsatz.identify_gate(gate) for gate in self._entanglement_gates]
+        gate_param_list = [(circ, len(circ.parameters)) for circ in self._entanglement_gates]
         return gate_param_list
 
     @entanglement_gates.setter
@@ -502,7 +448,7 @@ class TwoLocalAnsatz(Ansatz):
             list[tuple]: the single qubit gate(s) as tuples (QuantumCircuit.gate, num_parameters),
                 e.g. (QuantumCircuit.x, 0) or (QuantumCircuit.ry, 1)
         """
-        gate_param_list = [TwoLocalAnsatz.identify_gate(gate) for gate in self._rotation_gates]
+        gate_param_list = [(circ, len(circ.parameters)) for circ in self._rotation_gates]
         return gate_param_list
 
     @rotation_gates.setter
