@@ -383,7 +383,7 @@ class Ansatz:
         Returns:
             The qubit indices specifying the qubits each block acts on.
 
-        TODO handle 'full' or 'linear' as qarg
+        TODO handle 'full' or 'linear'
         """
         if self._entangler_maps:
             return self._entangler_maps
@@ -406,7 +406,7 @@ class Ansatz:
         elif isinstance(entanglement, list):
             if all(isinstance(e, str) for e in entanglement):
                 raise NotImplementedError('Setting by List[str] not currently supported.')
-            if all(isinstance(e, list) for e in entanglement): # is List[List[?]]
+            if all(isinstance(e, list) for e in entanglement):  # is List[List[?]]
                 if all(isinstance(e_i, int) for e in entanglement for e_i in e):
                     raise NotImplementedError('Setting by List[List[int]] not yet supported.')
                 if all(isinstance(e_i, list) for e in entanglement for e_i in e):
@@ -710,7 +710,7 @@ class Ansatz:
             # for applied block i in layer
             for i in self._reps_as_list():
                 n = len(get_parameters(self.blocks[i]))  # num parameters of the block
-                idcs = self.entangler_maps[i]  # qubits indices where this block get's applied
+                idcs = self.entangler_maps[i]  # qubits indices where this block gets applied
                 n_applied = len(idcs)  # number of times the block is applied
                 layer_params = []
                 for _ in range(n_applied):
@@ -721,7 +721,7 @@ class Ansatz:
         else:
             for i in self._reps_as_list():
                 block_params = get_parameters(self.blocks[i])
-                idcs = self.entangler_maps[i]  # qubits indices where this block get's applied
+                idcs = self.entangler_maps[i]  # qubits indices where this block gets applied
                 n_applied = len(idcs)  # number of times the block is applied
                 layer_params = []
                 for _ in range(n_applied):
