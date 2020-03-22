@@ -14,7 +14,7 @@
 
 """
 Ansätze (:mod:`qiskit.aqua.components.ansatzes`)
-===================================================================
+================================================
 In quantum mechanics, the *variational method* is one way of finding approximations to the lowest
 energy eigenstate, or *ground state*, and some excited states. This allows calculating approximate
 wave functions, such as molecular orbitals. The basis for this method is the *variational
