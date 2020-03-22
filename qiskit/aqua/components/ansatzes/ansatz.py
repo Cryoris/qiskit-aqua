@@ -417,11 +417,13 @@ class Ansatz:
 
     @property
     def qubit_indices(self):
+        """Get the entangler maps."""
         warnings.warn('Deprecated, use entangler_maps getter')
         return self.entangler_maps
 
     @qubit_indices.setter
     def qubit_indices(self, indicies):
+        """Set the entangler maps."""
         warnings.warn('Deprecated, use entangler_maps setter')
         self.entangler_maps = indicies
 
