@@ -16,8 +16,8 @@
 
 from typing import Union, List
 import numpy as np
+from qiskit import QuantumCircuit
 from qiskit.aqua.aqua_error import AquaError
-from qiskit.aqua.components.ansatzes.ansatz import Ansatz
 
 
 class VarFormBased:
@@ -37,7 +37,7 @@ class VarFormBased:
     """
 
     def __init__(self,
-                 var_form: Ansatz,
+                 var_form: QuantumCircuit,
                  params: Union[List[float], np.ndarray]) -> None:
         """
         Args:
@@ -73,6 +73,10 @@ class VarFormBased:
             raise RuntimeError('Initial state based on variational '
                                'form does not support vector mode.')
         if mode == 'circuit':
-            return self._var_form.construct_circuit(self._var_form_params, q=register)
+            if hasattr(self._var_form, 'construct_circuit'):
+                return self._var_form.construct_circuit(self._var_form_params, q=register)
+            else:
+                value_dict = dict(list(self._var_form.parameters), self._var_form_params)
+                return self._var_form.bind_parameters(value_dict)
         else:
             raise AquaError('Mode should be either "vector" or "circuit"')

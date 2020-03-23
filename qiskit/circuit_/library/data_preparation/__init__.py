@@ -11,9 +11,21 @@
 # Any modifications or derivative works of this code must retain this
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
-"""
-This module contains the definition of a base class for
-feature map. Several types of commonly used approaches.
-"""
 
-from qiskit.circuit_.library import PauliZExpansion
+"""Feature maps."""
+
+from .data_mapping import self_product
+from .pauli_expansion import PauliExpansion
+from .pauli_z_expansion import PauliZExpansion
+from .first_order_expansion import FirstOrderExpansion
+from .second_order_expansion import SecondOrderExpansion
+from .raw_feature_vector import RawFeatureVector
+
+__all__ = [
+    'self_product',
+    'PauliExpansion',
+    'PauliZExpansion',
+    'FirstOrderExpansion',
+    'SecondOrderExpansion',
+    'RawFeatureVector'
+]

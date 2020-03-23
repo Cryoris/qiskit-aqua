@@ -96,25 +96,24 @@ Feature Map Utility
 
 """
 
-from .operator_ansatz import OperatorAnsatz
-from .ansatz import Ansatz
-from .two_local_ansatz import TwoLocalAnsatz
-from .ry import RY
-from .ryrz import RYRZ
-from .swaprz import SwapRZ
-from .feature_maps import (PauliExpansion, PauliZExpansion, FirstOrderExpansion,
-                           SecondOrderExpansion, RawFeatureVector, self_product)
+# from .operator_ansatz import OperatorAnsatz
+from .n_local_circuit import NLocalCircuit
+from .two_local_circuit import TwoLocalCircuit
+from .ansatzes.ry import RY
+from .ansatzes.ryrz import RYRZ
+from .ansatzes.swaprz import SwapRZ
+from .data_preparation import (PauliExpansion, PauliZExpansion, FirstOrderExpansion,
+                               SecondOrderExpansion, RawFeatureVector, self_product)
 
 __all__ = [
-    'Ansatz',
     'FirstOrderExpansion',
-    'OperatorAnsatz',
+    'NLocalCircuit',
     'PauliExpansion',
     'RawFeatureVector',
     'RY',
     'RYRZ',
     'SecondOrderExpansion',
     'SwapRZ',
-    'TwoLocalAnsatz',
+    'TwoLocalCircuit',
     'self_product',
 ]
