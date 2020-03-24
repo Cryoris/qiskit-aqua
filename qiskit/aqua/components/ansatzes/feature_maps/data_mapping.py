@@ -16,4 +16,6 @@
 This module contains the definition of data mapping function for feature map.
 """
 
-from qiskit.circuit_.library import self_product
+from qiskit.circuit_library import self_product
+
+__all__ = ['self_product']

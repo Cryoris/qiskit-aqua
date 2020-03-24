@@ -16,7 +16,7 @@
 
 import warnings
 from typing import Union, Optional, List, Callable
-from qiskit.circuit_.library import TwoLocalCircuit
+from qiskit.circuit_library import TwoLocalCircuit
 
 from ..initial_states.initial_state import InitialState
 

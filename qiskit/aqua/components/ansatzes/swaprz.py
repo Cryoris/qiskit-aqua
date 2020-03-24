@@ -14,4 +14,4 @@
 
 """The SwapRZ variational form."""
 
-from qiskit.circuit_.library import SwapRZ
+from qiskit.circuit_library import SwapRZ

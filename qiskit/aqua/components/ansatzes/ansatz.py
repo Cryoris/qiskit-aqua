@@ -18,7 +18,7 @@ import warnings
 from typing import Union, Optional, List
 from qiskit import QuantumCircuit
 from qiskit.circuit import Parameter, Instruction
-from qiskit.circuit_.library.n_local_circuit import NLocalCircuit
+from qiskit.circuit_library.n_local_circuit import NLocalCircuit
 from ..initial_states.initial_state import InitialState
 
 

@@ -14,4 +14,6 @@
 
 """The raw feature vector Ansatz. Encodes given data in the qubit amplitudes."""
 
-from qiskit.circuit_.library import RawFeatureVector
+from qiskit.circuit_library import RawFeatureVector
+
+__all__ = ['RawFeatureVector']

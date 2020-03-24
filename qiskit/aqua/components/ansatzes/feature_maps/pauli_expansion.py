@@ -17,4 +17,6 @@ This module contains the definition of a base class for
 feature map. Several types of commonly used approaches.
 """
 
-from qiskit.circuit_.library import PauliExpansion
+from qiskit.circuit_library import PauliExpansion
+
+__all__ = ['PauliExpansion']

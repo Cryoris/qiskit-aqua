@@ -14,4 +14,6 @@
 
 """The RYRZ variational form."""
 
-from qiskit.circuit_.library import RYRZ
+from qiskit.circuit_library import RYRZ
+
+__all__ = ['RYRZ']

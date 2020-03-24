@@ -14,4 +14,6 @@
 
 """First Order Expansion feature map."""
 
-from qiskit.circuit_.library import FirstOrderExpansion
+from qiskit.circuit_library import FirstOrderExpansion
+
+__all__ = ['FirstOrderExpansion']
