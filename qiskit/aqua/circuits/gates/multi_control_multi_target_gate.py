@@ -20,6 +20,7 @@ import warnings
 from qiskit.circuit import Gate, Instruction, Qubit, QuantumRegister, QuantumCircuit
 from qiskit.exceptions import QiskitError
 from qiskit.extensions.standard.x import CCXGate
+from qiskit.util import deprecate_arguments
 
 
 def _ccx_v_chain_rule(control_qubits: Union[QuantumRegister, List[Qubit]],
@@ -138,7 +139,18 @@ class MCMTGate(Gate):
         self.definition = definition
 
 
-def mcmt(self, controlled_gate, control_qubits, target_qubits, ancilla_qubits=None, mode=None):
+# pylint:disable=unused-argument
+@deprecate_arguments({'single_control_gate_fun': 'controlled_gate',
+                      'q_controls': 'control_qubits',
+                      'q_ancillae': 'ancilla_qubits',
+                      'q_targets': 'target_qubits'})
+def mcmt(self, controlled_gate, control_qubits, target_qubits, ancilla_qubits=None, mode=None,
+         *, single_control_gate_fun=None, q_controls=None, q_ancillae=None, q_targets=None):
+    """Apply a multi-control, multi-target using a generic gate.
+
+    This can also be used to implement a generic multi-Control gate, as the target could also be of
+    length 1.
+    """
     # for backward compatibility; the previous signature was
     # `def mcmt(self, q_controls, q_ancillae, single_control_gate_fun, q_targets, mode="basic")`
     if callable(target_qubits):
