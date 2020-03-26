@@ -11,52 +11,39 @@
 # Any modifications or derivative works of this code must retain this
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
-"""
-Multiple-Control, Multiple-Target Gate.
-"""
 
-from qiskit.circuit import Gate, QuantumRegister
+"""Multiple-Control, Multiple-Target Gate."""
+
+from typing import Union, Callable, List, Tuple
+
+import warnings
+from qiskit.circuit import Gate, Instruction, Qubit, QuantumRegister, QuantumCircuit
 from qiskit.exceptions import QiskitError
 from qiskit.extensions.standard.x import CCXGate
 
-from qiskit.circuit import QuantumCircuit
-from qiskit.aqua import AquaError
 
+def _ccx_v_chain_rule(control_qubits: Union[QuantumRegister, List[Qubit]],
+                      ancilla_qubits: Union[QuantumRegister, List[Qubit]],
+                      reverse: bool = False) -> List[Tuple[Gate, List[Qubit], List]]:
+    """Get the rule for the CCX V-chain.
 
-def _ccx_v_chain_compute(qc, control_qubits, ancillary_qubits):
-    """
-    First half (compute) of the multi-control basic mode. It progressively compute the
-    ccx of the control qubits and put the final result in the last ancillary
-    qubit
+    The CCX V-chain progressively computes the CCX of the control qubits and puts the final result
+    in the last ancillary qubit.
+
     Args:
-        qc (QuantumCircuit): the Quantum Circuit
-        control_qubits (list): the list of control qubits
-        ancillary_qubits (list): the list of ancillary qubits
+        control_qubits: The control qubits.
+        ancilla_qubits: The ancilla qubits.
+        reverse: If True, compute the chain down to the qubit. If False, compute upwards.
 
+    Returns:
+        The rule for the (reversed) CCX V-chain.
+
+    Raises:
+        QiskitError: If an insufficient number of ancilla qubits was provided.
     """
-    anci_idx = 0
-    qc.ccx(control_qubits[0], control_qubits[1], ancillary_qubits[anci_idx])
-    for idx in range(2, len(control_qubits)):
-        assert anci_idx + 1 < len(
-            ancillary_qubits
-        ), "Insufficient number of ancillary qubits {0}.".format(
-            len(ancillary_qubits))
-        qc.ccx(control_qubits[idx], ancillary_qubits[anci_idx],
-               ancillary_qubits[anci_idx + 1])
-        anci_idx += 1
+    if len(ancilla_qubits) == 0:
+        return []
 
-
-def _ccx_v_chain_rule(control_qubits, ancilla_qubits, forward=True):
-    """
-    First half (compute) of the multi-control basic mode. It progressively compute the
-    ccx of the control qubits and put the final result in the last ancillary
-    qubit
-    Args:
-        qc (QuantumCircuit): the Quantum Circuit
-        control_qubits (list): the list of control qubits
-        ancillary_qubits (list): the list of ancillary qubits
-
-    """
     if len(ancilla_qubits) < len(control_qubits) - 1:
         raise QiskitError('Insufficient number of ancilla qubits.')
 
@@ -66,43 +53,46 @@ def _ccx_v_chain_rule(control_qubits, ancilla_qubits, forward=True):
             (CCXGate(), [control_qubits[j], ancilla_qubits[i], ancilla_qubits[i + 1]], [])
         ]
 
-    if forward:
-        return rule
-    return reversed(rule)
-
-
-def _ccx_v_chain_uncompute(qc, control_qubits, ancillary_qubits):
-    """
-    Second half (uncompute) of the multi-control basic mode. It progressively compute the
-    ccx of the control qubits and put the final result in the last ancillary
-    qubit
-    Args:
-        qc (QuantumCircuit): the Quantum Circuit
-        control_qubits (list): the list of control qubits
-        ancillary_qubits (list): the list of ancillary qubits
-    """
-    anci_idx = len(ancillary_qubits) - 1
-    for idx in (range(2, len(control_qubits)))[::-1]:
-        qc.ccx(control_qubits[idx], ancillary_qubits[anci_idx - 1],
-               ancillary_qubits[anci_idx])
-        anci_idx -= 1
-    qc.ccx(control_qubits[0], control_qubits[1], ancillary_qubits[anci_idx])
+    if reverse:
+        return reversed(rule)
+    return rule
 
 
 class MCMTGate(Gate):
-    def __init__(self, num_ctrl_qubits, num_target_qubits, controlled_gate):
-        """Create a new multi-control multi-target gate."""
+    """The multi-controlled multi-target gate, for an arbitrary singly controlled target gate."""
+
+    def __init__(self, controlled_gate: Union[Gate, Callable[[QuantumCircuit, Qubit, Qubit],
+                                                             Instruction]],
+                 num_ctrl_qubits: int,
+                 num_target_qubits: int) -> None:
+        """Create a new multi-control multi-target gate.
+
+        Args:
+            controlled_gate: The controlled gate to be applied controlled on the control qubits
+                and applied to the target qubits. Can be either a Gate or a circuit method.
+                If it is a callable, it will be casted to a Gate.
+            num_ctrl_qubits: The number of control qubits.
+            num_target_qubits: The number of target qubits.
+
+        Raises:
+            QiskitError: If the controlled gate does not act on exactly 2 qubits.
+        """
+        if callable(controlled_gate):
+            q = QuantumRegister(2)
+            circuit = QuantumCircuit(q)
+            controlled_gate(circuit, q[0], q[1])
+            controlled_gate = circuit.to_gate()
+
         if controlled_gate.num_qubits != 2:
             raise QiskitError('The target gate must be a single-qubit gate.')
-
-        num_qubits = num_ctrl_qubits + num_target_qubits
-        num_qubits += MCMTGate.num_required_ancillas(num_ctrl_qubits)
-
-        super().__init__('mcmt', num_qubits, [])
 
         self._controlled_gate = controlled_gate
         self._num_ctrl_qubits = num_ctrl_qubits
         self._num_target_qubits = num_target_qubits
+
+        num_qubits = num_ctrl_qubits + num_target_qubits + self.num_ancilla_qubits
+
+        super().__init__('mcmt', num_qubits, [])
 
     @property
     def num_ctrl_qubits(self):
@@ -119,99 +109,72 @@ class MCMTGate(Gate):
         """The underlying controlled gate."""
         return self._controlled_gate
 
-    @staticmethod
-    def num_required_ancillas(num_ctrl_qubits):
+    @property
+    def num_ancilla_qubits(self):
         """Number of required ancillas."""
-        return max(0, num_ctrl_qubits - 1)
+        return max(0, self.num_ctrl_qubits - 1)
 
     def _define(self):
         """Define the MCMT gate."""
-        qr_control = QuantumRegister(self.num_ctrl_qubits, 'control')
-        qr_target = QuantumRegister(self.num_target_qubits, 'target')
-        qr_ancilla = QuantumRegister(MCMTGate.num_required_ancillas(self.num_ctrl_qubits),
-                                     'ancilla')
-        definition = _ccx_v_chain_rule(qr_control, qr_ancilla, forward=True)
-        for qubit in range(qr_target):
+        definition = []
+        q = QuantumRegister(self.num_qubits, 'q')
+
+        control_qubits = q[:self.num_ctrl_qubits]
+        target_qubits = q[self.num_ctrl_qubits:self.num_ctrl_qubits + self.num_target_qubits]
+        ancilla_qubits = q[self.num_ctrl_qubits + self.num_target_qubits:]
+
+        if len(ancilla_qubits) > 0:
+            master_control = ancilla_qubits[-1]
+        else:
+            master_control = control_qubits[0]
+
+        definition += _ccx_v_chain_rule(control_qubits, ancilla_qubits, reverse=False)
+        for qubit in target_qubits:
             definition += [
-                (self.controlled_gate, [qr_ancilla[-1], qubit], [])
+                (self.controlled_gate, [master_control, qubit], [])
             ]
-        definition += _ccx_v_chain_rule(qr_control, qr_ancilla, forward=False)
+        definition += _ccx_v_chain_rule(control_qubits, ancilla_qubits, reverse=True)
 
         self.definition = definition
 
 
-def mcmt(self,
-         q_controls,
-         q_ancillae,
-         single_control_gate_fun,
-         q_targets,
-         mode="basic"):
-    """
-    Apply a Multi-Control, Multi-Target using a generic gate.
-    It can also be used to implement a generic Multi-Control gate,
-    as the target could also be of length 1.
+def mcmt(self, controlled_gate, control_qubits, target_qubits, ancilla_qubits=None, mode=None):
+    # for backward compatibility; the previous signature was
+    # `def mcmt(self, q_controls, q_ancillae, single_control_gate_fun, q_targets, mode="basic")`
+    if callable(target_qubits):
+        warnings.warn('It seems you are using the old signature of the MCMT gate, which is '
+                      'deprecated as of 0.13.0 and will be removed no earlier than 3 months '
+                      'after the release date. The signature has been updated to '
+                      'mcmct(controlled_gate, control_qubits, target_qubits, ancilla_qubits).',
+                      DeprecationWarning, stacklevel=3)
+        # swap arguments in the right order
+        tmp = controlled_gate
+        controlled_gate = target_qubits
+        target_qubits = ancilla_qubits
+        ancilla_qubits = control_qubits
+        control_qubits = tmp
 
-    Args:
-        self (QuantumCircuit): The QuantumCircuit object to apply the mcmt gate on.
-        q_controls (Union(QuantumRegister, list[Qubit])): The list of control qubits
-        q_ancillae (Union(QuantumRegister, list[Qubit])): The list of ancillary qubits
-        single_control_gate_fun (Gate): The single control gate function (e.g QuantumCircuit.cz
-                                        or QuantumCircuit.ch)
-        q_targets (Union(QuantumRegister, list[Qubit])): A list of qubits or a QuantumRegister
-            to which the gate function should be applied.
-        mode (str): The implementation mode to use (at the moment, only the basic mode is supported)
-    Raises:
-        AquaError: invalid input
+    if mode:
+        warnings.warn('It seems you are using the old signature of the MCMT gate, which is '
+                      'deprecated as of 0.13.0 and will be removed no earlier than 3 months '
+                      'after the release date. The signature has been updated to '
+                      'mcmct(controlled_gate, control_qubits, target_qubits, ancilla_qubits).'
+                      'Setting the mode is no longer supported (since only one mode is available).',
+                      DeprecationWarning, stacklevel=3)
 
-    """
-    # check controls
-    if isinstance(q_controls, QuantumRegister):
-        control_qubits = list(q_controls)
-    elif isinstance(q_controls, list):
-        control_qubits = q_controls
-    else:
-        raise AquaError('MCT needs a list of qubits or a quantum register for controls.')
+    gate = MCMTGate(controlled_gate, len(control_qubits), len(target_qubits))
+    num_ancillas = gate.num_ancilla_qubits
 
-    # check target
-    if isinstance(q_targets, QuantumRegister):
-        target_qubits = list(q_targets)
-    elif isinstance(q_targets, list):
-        target_qubits = q_targets
-    else:
-        raise AquaError('MCT needs a list of qubits or a quantum register for targets.')
+    if num_ancillas == 0:
+        ancilla_qubits = []
+    elif ancilla_qubits is None:
+        raise QiskitError('{} ancilla qubits are needed but None were given.'.format(num_ancillas))
+    elif len(ancilla_qubits) < num_ancillas:
+        raise QiskitError('Insufficient number of ancilla qubits, need {}'.format(num_ancillas))
 
-    # check ancilla
-    if q_ancillae is None:
-        ancillary_qubits = []
-    elif isinstance(q_ancillae, QuantumRegister):
-        ancillary_qubits = list(q_ancillae)
-    elif isinstance(q_ancillae, list):
-        ancillary_qubits = q_ancillae
-    else:
-        raise AquaError('MCT needs None or a list of qubits or a quantum register for ancilla.')
-
-    all_qubits = control_qubits + target_qubits + ancillary_qubits
-
-    self._check_qargs(all_qubits)
-    self._check_dups(all_qubits)
-
-    if len(q_controls) == 1:
-        for qubit in target_qubits:
-            single_control_gate_fun(self, q_controls[0], qubit)
-        return
-
-    if mode == 'basic':
-        # last ancillary qubit is the control of the gate
-        ancn = len(ancillary_qubits)
-        _ccx_v_chain_compute(self, control_qubits, ancillary_qubits)
-        for qubit in target_qubits:
-            single_control_gate_fun(self, ancillary_qubits[ancn - 1], qubit)
-        _ccx_v_chain_uncompute(self, control_qubits, ancillary_qubits)
-    else:
-        raise AquaError(
-            'Unrecognized mode "{0}" for building mcmt circuit, '
-            'at the moment only "basic" mode is supported.'
-            .format(mode))
+    return self.append(gate,
+                       control_qubits[:] + target_qubits[:] + ancilla_qubits[:num_ancillas],
+                       [])
 
 
 QuantumCircuit.mcmt = mcmt
