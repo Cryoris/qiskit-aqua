@@ -86,12 +86,26 @@ class CircuitFactory(ABC):
             q_ancillas (list): list of ancilla qubits (or None if none needed)
             use_basis_gates (bool): use basis gates for expansion of controlled circuit
         """
-        uncontrolled_circuit = QuantumCircuit(*qc.qregs)
-        self.build(uncontrolled_circuit, q, q_ancillas)
+        qubits = [qubit for qubit in q if q != q_control]
 
-        controlled_circuit = get_controlled_circuit(uncontrolled_circuit,
-                                                    q_control, use_basis_gates=use_basis_gates)
-        qc.extend(controlled_circuit)
+        from qiskit import QuantumRegister
+        qr = QuantumRegister(len(qubits))
+        uncontrolled_circuit = QuantumCircuit(qr, q_ancillas)
+        self.build(uncontrolled_circuit, qr, q_ancillas)
+        # uncontrolled_circuit = QuantumCircuit(*qc.qregs)
+
+        print(q_control)
+        print(uncontrolled_circuit.qregs)
+
+        controlled_circuit = uncontrolled_circuit.to_gate().control()
+
+        # controlled_circuit = get_controlled_circuit(uncontrolled_circuit,
+        #                                             q_control, use_basis_gates=use_basis_gates)
+        qubits = [q_control] + q[:]
+        if q_ancillas:
+            qubits += q_ancillas[:]
+        print('qc', qc.num_qubits, 'gate', controlled_circuit.num_qubits)
+        qc.append(controlled_circuit, qubits)
 
     def build_controlled_inverse(self, qc, q, q_control, q_ancillas=None, use_basis_gates=True):
         """ Adds controlled inverse of corresponding sub-circuit to given circuit
