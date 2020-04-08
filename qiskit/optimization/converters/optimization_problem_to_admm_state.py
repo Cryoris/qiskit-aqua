@@ -20,7 +20,6 @@ import numpy as np
 from ..algorithms.admm import ADMMState, ADMMParameters
 from ..problems.optimization_problem import OptimizationProblem
 from ..problems.variables import CPX_BINARY, CPX_CONTINUOUS
-from ..utils.qiskit_optimization_error import QiskitOptimizationError
 
 
 class OptimizationProblemToADMMState:
