@@ -21,9 +21,10 @@ from docplex.mp.model import Model
 
 import numpy as np
 from qiskit.aqua.algorithms import NumPyMinimumEigensolver
-from qiskit.optimization.algorithms import CplexOptimizer, MinimumEigenOptimizer
-from qiskit.optimization.algorithms.admm_optimizer import ADMMOptimizer, ADMMParameters, \
-    ADMMOptimizerResult, ADMMState
+from qiskit.optimization.algorithms import (
+    CplexOptimizer, MinimumEigenOptimizer, ADMMOptimizer, ADMMParameters, ADMMState
+)
+from qiskit.optimization.algorithms.admm.admm_optimizer import ADMMOptimizerResult
 from qiskit.optimization.problems import OptimizationProblem
 
 
