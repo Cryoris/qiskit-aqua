@@ -14,10 +14,10 @@
 
 """The module containing the converter from the Optimization Problem to an ADMM state."""
 
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 import numpy as np
 
-from ..algorithms.admm import ADMMState, ADMMParameters
+from ..algorithms.admm.admm_state import ADMMState
 from ..problems.optimization_problem import OptimizationProblem
 from ..problems.variables import CPX_BINARY, CPX_CONTINUOUS
 
