@@ -16,7 +16,7 @@
 
 import logging
 import time
-from typing import List, Optional, Any, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 from cplex import SparsePair
@@ -27,37 +27,11 @@ from ..optimization_algorithm import OptimizationAlgorithm
 from ...converters.optimization_problem_to_admm_state import OptimizationProblemToADMMState
 from ...problems.optimization_problem import OptimizationProblem
 from ...problems.variables import CPX_BINARY, CPX_CONTINUOUS
-from ...results.optimization_result import OptimizationResult
+from ...results.admm_optimization_result import ADMMOptimizationResult
 
 UPDATE_RHO_BY_RESIDUALS = 1
 
 logger = logging.getLogger(__name__)
-
-
-class ADMMOptimizerResult(OptimizationResult):
-    """A class representing the result of the ADMMOptimizer."""
-
-    def __init__(self, x: Optional[Any] = None, fval: Optional[Any] = None,
-                 state: Optional[ADMMState] = None, results: Optional[Any] = None) -> None:
-        """
-        Args:
-            x: The found solution.
-            fval: The function value evaluated at the solution.
-            state: A :class:`~qiskit.optimization.algorithms.admm_optimizer.ADMMState` object
-                representing the state of the ADMM optimization.
-            results: Additional information about the result.
-        """
-        super().__init__(x, fval, results)
-        self._state = state
-
-    @property
-    def state(self) -> Optional[ADMMState]:
-        """The ADMM optimization state.
-
-        Returns:
-            The final ADMM optimization state, if it was set.
-        """
-        return self._state
 
 
 class ADMMOptimizer(OptimizationAlgorithm):
@@ -131,7 +105,7 @@ class ADMMOptimizer(OptimizationAlgorithm):
 
         return None
 
-    def solve(self, problem: OptimizationProblem) -> ADMMOptimizerResult:
+    def solve(self, problem: OptimizationProblem) -> ADMMOptimizationResult:
         """Tries to solves the given problem using ADMM algorithm.
 
         Args:
@@ -207,7 +181,7 @@ class ADMMOptimizer(OptimizationAlgorithm):
         solution = self._revert_solution_indexes(solution)
 
         # third parameter is our internal state of computations.
-        result = ADMMOptimizerResult(solution, objective_value, self._state)
+        result = ADMMOptimizationResult(solution, objective_value, self._state)
         # debug
         logger.debug("solution=%s, objective=%s at iteration=%s",
                      solution, objective_value, iteration)

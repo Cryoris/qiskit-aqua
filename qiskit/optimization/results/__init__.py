@@ -48,7 +48,8 @@ from .quality_metrics import QualityMetrics
 from .solution import SolutionInterface
 from .solution_status import SolutionStatus
 from .optimization_result import OptimizationResult
+from .admm_optimization_result import ADMMOptimizationResult
 from .grover_optimization_results import GroverOptimizationResults
 
 __all__ = ["SolutionStatus", "QualityMetrics", "SolutionStatus", "OptimizationResult",
-           "GroverOptimizationResults"]
+           "ADMMOptimizationResult", "GroverOptimizationResults"]
