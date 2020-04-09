@@ -19,7 +19,6 @@ import time
 from typing import List, Optional, Tuple
 
 import numpy as np
-from cplex import SparsePair
 from .admm_state import ADMMState
 from .admm_parameters import ADMMParameters, UPDATE_RHO_BY_TEN_PERCENT
 from ..cplex_optimizer import CplexOptimizer
@@ -32,6 +31,13 @@ from ...results.admm_optimization_result import ADMMOptimizationResult
 UPDATE_RHO_BY_RESIDUALS = 1
 
 logger = logging.getLogger(__name__)
+
+_HAS_CPLEX = False
+try:
+    from cplex import SparsePair
+    _HAS_CPLEX = True
+except ImportError:
+    logger.info('CPLEX is not installed.')
 
 
 class ADMMOptimizer(OptimizationAlgorithm):
@@ -54,7 +60,12 @@ class ADMMOptimizer(OptimizationAlgorithm):
             continuous_optimizer: An instance of OptimizationAlgorithm that can solve
                 continuous problems.
             params: An instance of ADMMParameters.
+
+        Raises:
+            NameError: CPLEX is not installed.
         """
+        if not _HAS_CPLEX:
+            raise NameError('CPLEX is not installed.')
 
         super().__init__()
 
