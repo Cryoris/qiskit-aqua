@@ -144,7 +144,7 @@ class ADMMOptimizer(OptimizationAlgorithm):
             QiskitOptimizationError: If the problem is incompatible with the optimizer.
         """
         # parse problem and convert to an ADMM specific representation
-        self._state = OptimizationProblemToADMMState(self._params).encode(problem)
+        self._state = OptimizationProblemToADMMState(self._params.rho_initial).encode(problem)
 
         start_time = time.time()
         # we have not stated our computations yet, so elapsed time initialized as zero.

@@ -25,12 +25,16 @@ from ..problems.variables import CPX_BINARY, CPX_CONTINUOUS
 class OptimizationProblemToADMMState:
     """Converts an optimization problem to an ADMM state."""
 
-    def __init__(self, admm_params: ADMMParameters) -> None:
+    def __init__(self, rho_initial: Optional[float] = None) -> None:
         """
         Args:
-            admm_params: The parameters to the ADMM optimization.
+            rho_initial: The initial rho parameter of the ADMM optimization. If an
+                ``ADMMParameters`` object is available, this parameter is accessible as
+                ``ADMMParameters.rho_initial``.
         """
-        self.admm_params = admm_params
+        # we need rho_initial only as additional parameter in the ADMM state, the conversion can be
+        # done without this -- therefore leave it as optional
+        self.rho_initial = rho_initial
 
     def encode(self, problem: OptimizationProblem) -> ADMMState:
         """Convert the QUBO into an initial ADMM state
@@ -56,8 +60,7 @@ class OptimizationProblemToADMMState:
         continuous_indices = self._get_variable_indices(problem, CPX_CONTINUOUS)
 
         # create our computation state.
-        state = ADMMState(problem, binary_indices, continuous_indices,
-                          self.admm_params.rho_initial)
+        state = ADMMState(problem, binary_indices, continuous_indices, self.rho_initial)
 
         state.q0 = self._get_q(problem, binary_indices)
         state.c0 = self._get_c(problem, binary_indices)
@@ -156,13 +159,12 @@ class OptimizationProblemToADMMState:
                 continue
             row = problem.linear_constraints.get_rows(constraint_index)
             if set(row.ind).issubset(index_set):
-                self._assign_row_values(problem, matrix, vector,
-                                        constraint_index, binary_indices)
+                self._assign_row_values(problem, matrix, vector, constraint_index, binary_indices)
             else:
                 raise ValueError(
                     "Linear constraint with the 'E' sense must contain only binary variables, "
-                    "row indices: {}, binary variable indices: {}".format(
-                        row, binary_indices))
+                    "row indices: {}, binary variable indices: {}".format(row, binary_indices)
+                )
 
         return self._create_ndarrays(matrix, vector, len(binary_indices))
 
@@ -288,8 +290,7 @@ class OptimizationProblemToADMMState:
             matrix[-1] = [-1 * el for el in matrix[-1]]
             vector[-1] = -1 * vector[-1]
 
-    @staticmethod
-    def _create_ndarrays(matrix: List[List[float]], vector: List[float], size: int) \
+    def _create_ndarrays(self, matrix: List[List[float]], vector: List[float], size: int) \
             -> Tuple[np.ndarray, np.ndarray]:
         """Converts representation of a matrix and a vector in form of lists to numpy array.
 
