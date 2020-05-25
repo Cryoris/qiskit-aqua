@@ -33,17 +33,21 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         [1]: `arXiv:2002.02417 <https://arxiv.org/pdf/2003.02417.pdf>`_
     """
 
-    def __init__(self, N, delta, maxiter, a_factory=None, q_factory=None, i_objective=None,
-                 quantum_instance=None):
+    def __init__(self, N, delta, maxiter, a_factory=None, q_factory=None, x_factory=None,
+                 i_objective=None, quantum_instance=None):
         super().__init__(a_factory, q_factory, i_objective, quantum_instance)
         self._N = N
         self._delta = delta
         self._maxiter = maxiter
         self._num_oracle_calls = 0
+        self._x_factory = x_factory
 
     @property
     def x_factory(self):
         """X = A x R"""
+        if self._x_factory is not None:
+            return self._x_factory
+
         if self._a_factory is not None:
             return XFactory(self._a_factory)
 
@@ -123,6 +127,7 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         # add classical register if needed
         if measurement:
             c = ClassicalRegister(2)
+            # c = ClassicalRegister(1)
             circuit.add_register(c)
 
         # add A operator
@@ -138,6 +143,7 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
             # happen if the circuit gets transpiled, hence we're adding a safeguard-barrier
             circuit.barrier()
             circuit.measure([q[self.i_objective[0]], q[self.i_objective[1]]], [c[0], c[1]])
+            # circuit.measure(q[self.i_objective[0]], c[0])
 
         return circuit
 
