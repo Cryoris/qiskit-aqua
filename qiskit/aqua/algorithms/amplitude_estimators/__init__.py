@@ -17,6 +17,7 @@
 from .ae import AmplitudeEstimation
 from .iqae import IterativeAmplitudeEstimation
 from .mlae import MaximumLikelihoodAmplitudeEstimation
+from .faster_ae import FasterAmplitudeEstimation
 
 __all__ = [
     'AmplitudeEstimation',

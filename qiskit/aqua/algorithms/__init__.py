@@ -184,7 +184,8 @@ from .vq_algorithm import VQAlgorithm, VQResult
 from .amplitude_amplifiers import Grover
 from .amplitude_estimators import (AmplitudeEstimation,
                                    IterativeAmplitudeEstimation,
-                                   MaximumLikelihoodAmplitudeEstimation)
+                                   MaximumLikelihoodAmplitudeEstimation,
+                                   FasterAmplitudeEstimation)
 from .classifiers import VQC, QSVM, SklearnSVM, SVM_Classical
 from .distribution_learners import QGAN
 from .eigen_solvers import NumPyEigensolver, ExactEigensolver, EigensolverResult
@@ -228,6 +229,7 @@ __all__ = [
     'AmplitudeEstimation',
     'IterativeAmplitudeEstimation',
     'MaximumLikelihoodAmplitudeEstimation',
+    'FasterAmplitudeEstimation',
     'Simon',
     'DeutschJozsa',
     'BernsteinVazirani',

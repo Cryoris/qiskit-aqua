@@ -24,7 +24,8 @@ from .s_0_reflection import S0Factory
 
 class QFactory(CircuitFactory):
     """ Q Factory """
-    def __init__(self, a_factory, i_objective):
+
+    def __init__(self, a_factory, i_objective=None, s_psi_0_factory=None):
 
         super().__init__(a_factory.num_target_qubits)
 
@@ -33,7 +34,10 @@ class QFactory(CircuitFactory):
         self.i_objective = i_objective
 
         # construct reflection factories
-        self.s_psi_0_reflection_factory = SPsi0Factory(a_factory.num_target_qubits, i_objective)
+        if s_psi_0_factory:
+            self.s_psi_0_reflection_factory = s_psi_0_factory
+        else:
+            self.s_psi_0_reflection_factory = SPsi0Factory(a_factory.num_target_qubits, i_objective)
         self.s_0_reflection_factory = S0Factory(a_factory.num_target_qubits)
 
         # determine number of required ancillas (A does not need to be controlled within Q!)
