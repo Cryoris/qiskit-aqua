@@ -72,7 +72,7 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
             return self._i_objective
 
         if self._a_factory is not None:
-            return [self._a_factory.num_target_qubits - 2, self._a_factory.num_target_qubits - 1]
+            return [self._a_factory.num_target_qubits - 1, self._a_factory.num_target_qubits]
 
         return None
 
@@ -226,4 +226,4 @@ class S11Factory(CircuitFactory):
 
     # pylint:disable=unused-argument
     def build(self, qc, q, q_ancillas=None, params=None):
-        qc.cz(q[self.num_target_qubits - 2], q[self.num_target_qubits - 1])
+        qc.cz(q[self.num_target_qubits - 1], q[self.num_target_qubits])
