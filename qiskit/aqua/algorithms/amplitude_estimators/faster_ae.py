@@ -88,6 +88,11 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         return None
 
     @property
+    def is_rescaled(self):
+        """Check if the amplitude has been rescaled."""
+        return (self._q_factory is None)
+
+    @property
     def q_factory(self) -> Optional[CircuitFactory]:
         r"""The Q operator.
 
@@ -118,12 +123,22 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
 
         return None
 
-    def _cos_estimate(self, k, shots):
+    def _cos_estimate(self, k, shots=1024):
         if self._quantum_instance is None:
             raise AquaError('Quantum instance must be set.')
 
         if self._quantum_instance.is_statevector:
-            raise NotImplementedError
+            circuit = self.construct_circuit(k, measurement=False)
+            statevector = self._quantum_instance.execute(circuit).get_statevector()
+
+            # sum over all amplitudes where the objective qubits are 1
+            prob = 0
+            for i, amplitude in enumerate(statevector):
+                state = bin(i)[2:].zfill(circuit.num_qubits)[::-1]
+                if all(state[i] == '1' for i in self.i_objective):
+                    prob = prob + np.abs(amplitude)**2
+
+            cos_estimate = 1 - 2 * prob
         else:
             circuit = self.construct_circuit(k, measurement=True)
             self._quantum_instance.run_config.shots = shots
@@ -190,39 +205,49 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
 
     def _run(self):
         self._num_oracle_calls = 0
-        theta_ci = [0, np.arcsin(0.25)]
-        first_stage = True
 
-        theta_cis = []
-        num_first_stage_steps = 0
-        num_steps = 0
+        if self._quantum_instance.is_statevector:
+            cos = self._cos_estimate(k=0)
+            theta = np.arccos(cos) / 2
+            theta_ci = [theta, theta]
+            theta_cis = [theta_ci]
+            num_steps = num_first_stage_steps = 1
 
-        for j in range(1, self._maxiter + 1):
-            num_steps += 1
-            if first_stage:
-                num_first_stage_steps += 1
-                c = self._cos_estimate(2**(j - 1), self._shots[0])
-                chernoff_ci = self._chernoff(c, self._shots[0])
-                theta_ci = [np.arccos(x) / (2 ** (j + 1) + 2) for x in chernoff_ci[::-1]]
+        else:
+            theta_ci = [0, np.arcsin(0.25)]
+            first_stage = True
 
-                if 2 ** (j + 1) * theta_ci[1] >= 3 * np.pi / 8 and j < self._maxiter:
-                    j_0 = j
-                    v = 2 ** j * np.sum(theta_ci)
-                    first_stage = False
-            else:
-                cos = self._cos_estimate(2**(j - 1), self._shots[1])
-                cos_2 = self._cos_estimate(2 ** (j - 1) + 2 ** (j_0 - 1), self._shots[1])
-                sin = (c * np.cos(v) - cos_2) / np.sin(v)
-                rho = np.arctan2(sin, cos)
-                n = int(((2 ** (j + 1) + 2) * theta_ci[1] - rho) / (2 * np.pi))
+            theta_cis = []
+            num_first_stage_steps = 0
+            num_steps = 0
 
-                theta_ci = [(2 * np.pi * n + rho + sign * np.pi / 2) / (2 ** (j + 1) + 2)
-                            for sign in [-1, 1]]
-            theta_cis.append(theta_ci)
+            for j in range(1, self._maxiter + 1):
+                num_steps += 1
+                if first_stage:
+                    num_first_stage_steps += 1
+                    c = self._cos_estimate(2**(j - 1), self._shots[0])
+                    chernoff_ci = self._chernoff(c, self._shots[0])
+                    theta_ci = [np.arccos(x) / (2 ** (j + 1) + 2) for x in chernoff_ci[::-1]]
+
+                    if 2 ** (j + 1) * theta_ci[1] >= 3 * np.pi / 8 and j < self._maxiter:
+                        j_0 = j
+                        v = 2 ** j * np.sum(theta_ci)
+                        first_stage = False
+                else:
+                    cos = self._cos_estimate(2**(j - 1), self._shots[1])
+                    cos_2 = self._cos_estimate(2 ** (j - 1) + 2 ** (j_0 - 1), self._shots[1])
+                    sin = (c * np.cos(v) - cos_2) / np.sin(v)
+                    rho = np.arctan2(sin, cos)
+                    n = int(((2 ** (j + 1) + 2) * theta_ci[1] - rho) / (2 * np.pi))
+
+                    theta_ci = [(2 * np.pi * n + rho + sign * np.pi / 2) / (2 ** (j + 1) + 2)
+                                for sign in [-1, 1]]
+                theta_cis.append(theta_ci)
 
         theta = np.mean(theta_ci)
-        value = (4 * np.sin(theta)) ** 2
-        value_ci = [(4 * np.sin(x)) ** 2 for x in theta_ci]
+        rescaling = 4 if self.is_rescaled else 1
+        value = (rescaling * np.sin(theta)) ** 2
+        value_ci = [(rescaling * np.sin(x)) ** 2 for x in theta_ci]
 
         results = {
             'theta': theta,
