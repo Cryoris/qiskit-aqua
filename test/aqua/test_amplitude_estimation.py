@@ -22,6 +22,7 @@ import numpy as np
 from ddt import ddt, idata, data, unpack
 from qiskit import QuantumRegister, QuantumCircuit, BasicAer, execute
 from qiskit.circuit.library import QFT
+from qiskit.quantum_info import Operator
 from qiskit.aqua import QuantumInstance
 from qiskit.aqua.components.iqfts import Standard
 from qiskit.aqua.components.uncertainty_models import GaussianConditionalIndependenceModel as GCI
@@ -31,7 +32,7 @@ from qiskit.aqua.components.uncertainty_problems import (MultivariateProblem,
                                                          UncertaintyProblem)
 from qiskit.aqua.circuits import WeightedSumOperator
 from qiskit.aqua.algorithms import (AmplitudeEstimation, MaximumLikelihoodAmplitudeEstimation,
-                                    IterativeAmplitudeEstimation)
+                                    IterativeAmplitudeEstimation, FasterAmplitudeEstimation)
 from qiskit.aqua.algorithms.amplitude_estimators.q_factory import QFactory
 
 
@@ -137,6 +138,15 @@ class TestBernoulli(QiskitAquaTestCase):
 
         self._qasm = qasm
 
+    def get_grover_power_circuit(self, power, prob):
+        angle = 2 * np.arcsin(np.sqrt(prob))
+        circuit = QuantumCircuit(1)
+        circuit.ry(angle, 0)  # A operator
+        if power > 0:
+            circuit.ry(2 * power * angle, 0)  # Q^power operator
+
+        return circuit
+
     def tearDown(self):
         super().tearDown()
         warnings.filterwarnings(action="always", category=DeprecationWarning)
@@ -153,7 +163,8 @@ class TestBernoulli(QiskitAquaTestCase):
         [0.2, IterativeAmplitudeEstimation(0.1, 0.1), {'estimation': 0.2}],
         [0.4, IterativeAmplitudeEstimation(0.00001, 0.01), {'estimation': 0.4}],
         [0.82, IterativeAmplitudeEstimation(0.00001, 0.05), {'estimation': 0.82}],
-        [0.49, IterativeAmplitudeEstimation(0.001, 0.01), {'estimation': 0.49}]
+        [0.49, IterativeAmplitudeEstimation(0.001, 0.01), {'estimation': 0.49}],
+        [0.12, FasterAmplitudeEstimation(), {'estimation': 0.12}]
     ])
     @unpack
     def test_statevector(self, prob, qae, expect):
@@ -177,7 +188,8 @@ class TestBernoulli(QiskitAquaTestCase):
         # [0.8, 10, MaximumLikelihoodAmplitudeEstimation(7), {'estimation': 0.800926}],
         [0.2, 100, IterativeAmplitudeEstimation(0.0001, 0.01), {'estimation': 0.199987}],
         [0.4, 1000, IterativeAmplitudeEstimation(0.001, 0.05), {'estimation': 0.400071}],
-        [0.8, 10, IterativeAmplitudeEstimation(0.1, 0.05), {'estimation': 0.811711}]
+        [0.8, 10, IterativeAmplitudeEstimation(0.1, 0.05), {'estimation': 0.811711}],
+        [0.12, 0, FasterAmplitudeEstimation([100, 100], 0.05, 3), {'estimation': 0.10659}],
     ])
     @unpack
     def test_qasm(self, prob, shots, qae, expect):
@@ -254,10 +266,7 @@ class TestBernoulli(QiskitAquaTestCase):
         if not use_circuit_library:
             warnings.filterwarnings(action="always", category=DeprecationWarning)
 
-    @idata([
-        [True], [False]
-    ])
-    @unpack
+    @data(True, False)
     def test_iqae_circuits(self, efficient_circuit):
         """Test circuits resulting from iterative amplitude estimation.
 
@@ -267,80 +276,50 @@ class TestBernoulli(QiskitAquaTestCase):
 
         for k in range(2, 7):
             qae = IterativeAmplitudeEstimation(0.01, 0.05, a_factory=BernoulliAFactory(prob))
-            angle = 2 * np.arcsin(np.sqrt(prob))
-
-            # manually set up the inefficient AE circuit
-            q_objective = QuantumRegister(1, 'q')
-            circuit = QuantumCircuit(q_objective)
-
-            # A operator
-            circuit.ry(angle, q_objective)
-
             if efficient_circuit:
                 qae.q_factory = BernoulliQFactory(qae.a_factory)
-                # for power in range(k):
-                #    circuit.ry(2 ** power * angle, q_objective[0])
-                circuit.ry(2 * k * angle, q_objective[0])
 
-            else:
-                q_factory = QFactory(qae.a_factory, i_objective=0)
-                for _ in range(k):
-                    q_factory.build(circuit, q_objective)
-
-            expected_unitary = self._unitary.execute(circuit).get_unitary()
-
+            reference = self.get_grover_power_circuit(k, prob)
             actual_circuit = qae.construct_circuit(k, measurement=False)
-            actual_unitary = self._unitary.execute(actual_circuit).get_unitary()
+            self.assertTrue(Operator(reference).equiv(actual_circuit))
 
-            diff = np.sum(np.abs(actual_unitary - expected_unitary))
-            self.assertAlmostEqual(diff, 0)
+    @data(True, False)
+    def test_fae_circuits(self, efficient_circuit):
+        """Test circuits resulting from iterative amplitude estimation.
 
-    @idata([
-        [True], [False]
-    ])
-    @unpack
+        Build the circuit manually and from the algorithm and compare the resulting unitaries.
+        """
+        prob = 0.5
+
+        for k in range(2, 7):
+            bernoulli = BernoulliAFactory(prob)
+            qae = FasterAmplitudeEstimation(x_factory=bernoulli)
+            if efficient_circuit:
+                qae.q_factory = BernoulliQFactory(qae.a_factory)
+            else:
+                qae.q_factory = QFactory(qae.a_factory, i_objective=0)
+
+            reference = self.get_grover_power_circuit(k, prob)
+            actual_circuit = qae.construct_circuit(k, measurement=False)
+            self.assertTrue(Operator(reference).equiv(actual_circuit))
+
+    @data(True, False)
     def test_mlae_circuits(self, efficient_circuit):
         """ Test the circuits constructed for MLAE """
         prob = 0.5
 
         for k in range(1, 7):
             qae = MaximumLikelihoodAmplitudeEstimation(k, a_factory=BernoulliAFactory(prob))
-            angle = 2 * np.arcsin(np.sqrt(prob))
+            if efficient_circuit:
+                qae.q_factory = BernoulliQFactory(qae.a_factory)
 
             # compute all the circuits used for MLAE
-            circuits = []
-
-            # 0th power
-            q_objective = QuantumRegister(1, 'q')
-            circuit = QuantumCircuit(q_objective)
-            circuit.ry(angle, q_objective)
-            circuits += [circuit]
-
-            # powers of 2
-            for power in range(k):
-                q_objective = QuantumRegister(1, 'q')
-                circuit = QuantumCircuit(q_objective)
-
-                # A operator
-                circuit.ry(angle, q_objective)
-
-                # Q^(2^j) operator
-                if efficient_circuit:
-                    qae.q_factory = BernoulliQFactory(qae.a_factory)
-                    circuit.ry(2 * 2 ** power * angle, q_objective[0])
-
-                else:
-                    q_factory = QFactory(qae.a_factory, i_objective=0)
-                    for _ in range(2**power):
-                        q_factory.build(circuit, q_objective)
-
+            circuits = [self.get_grover_power_circuit(0, prob)]
+            circuits += [self.get_grover_power_circuit(2 ** j, prob) for j in range(k)]
             actual_circuits = qae.construct_circuits(measurement=False)
 
             for actual, expected in zip(actual_circuits, circuits):
-                expected_unitary = self._unitary.execute(expected).get_unitary()
-                actual_unitary = self._unitary.execute(actual).get_unitary()
-                diff = np.sum(np.abs(actual_unitary - expected_unitary))
-                self.assertAlmostEqual(diff, 0)
+                self.assertTrue(Operator(actual).equiv(expected))
 
 
 @ddt
@@ -362,6 +341,7 @@ class TestProblemSetting(QiskitAquaTestCase):
         [AmplitudeEstimation(2)],
         [IterativeAmplitudeEstimation(0.1, 0.001)],
         [MaximumLikelihoodAmplitudeEstimation(3)],
+        [FasterAmplitudeEstimation()],
     ])
     @unpack
     def test_operators(self, qae):
@@ -396,6 +376,17 @@ class TestProblemSetting(QiskitAquaTestCase):
         self.assertIsNotNone(qae._a_factory)
         self.assertIsNotNone(qae._q_factory)
         self.assertIsNotNone(qae._i_objective)
+
+    def test_fae_x_operator(self):
+        """Test getting and setting of the X operator in FAE."""
+        fae = FasterAmplitudeEstimation()
+        self.assertIsNone(fae.x_factory)
+
+        fae.a_factory = self.a_bernoulli
+        self.assertIsNotNone(fae.x_factory)
+
+        fae.x_factory = self.a_bernoulli
+        self.assertEqual(fae.x_factory, self.a_bernoulli)
 
     @idata([
         [AmplitudeEstimation(2)],
@@ -454,6 +445,7 @@ class TestSineIntegral(QiskitAquaTestCase):
         [2, AmplitudeEstimation(2), {'estimation': 0.5, 'mle': 0.270290}],
         [4, MaximumLikelihoodAmplitudeEstimation(4), {'estimation': 0.272675}],
         [3, IterativeAmplitudeEstimation(0.1, 0.1), {'estimation': 0.272082}],
+        [3, FasterAmplitudeEstimation(), {'estimation': 0.272082}]
     ])
     @unpack
     def test_statevector(self, n, qae, expect):
@@ -471,6 +463,7 @@ class TestSineIntegral(QiskitAquaTestCase):
         [4, 10, AmplitudeEstimation(2), {'estimation': 0.5, 'mle': 0.333333}],
         [3, 10, MaximumLikelihoodAmplitudeEstimation(2), {'estimation': 0.256878}],
         [3, 1000, IterativeAmplitudeEstimation(0.01, 0.01), {'estimation': 0.271790}],
+        [3, 0, FasterAmplitudeEstimation([1000, 1000], 0.05, 3), {'estimation': 0.216443}],
     ])
     @unpack
     def test_qasm(self, n, shots, qae, expect):
@@ -520,11 +513,15 @@ class TestSineIntegral(QiskitAquaTestCase):
             self.assertEqual(confint, expected_confint)
             self.assertTrue(confint[0] <= result[key] <= confint[1])
 
-    def test_iqae_confidence_intervals(self):
+    @data(
+        [IterativeAmplitudeEstimation(0.1, 0.001), [0.1949134, 0.3554516]],
+        [FasterAmplitudeEstimation([100, 100], 0.05, 3), [0.0097289, 0.6265011]],
+    )
+    @unpack
+    def test_iterative_confidence_intervals(self, qae, expected_confint):
         """End-to-end test for the IQAE confidence interval."""
         n = 3
-        qae = IterativeAmplitudeEstimation(0.1, 0.01, a_factory=SineIntegralAFactory(n))
-        expected_confint = [0.19840508760087738, 0.35110155403424115]
+        qae.a_factory = SineIntegralAFactory(n)
 
         # statevector simulator
         result = qae.run(self._statevector)
@@ -534,10 +531,9 @@ class TestSineIntegral(QiskitAquaTestCase):
         self.assertAlmostEqual(confint[0], result['estimation'])
 
         # qasm simulator
-        shots = 100
-        result = qae.run(self._qasm(shots))
+        result = qae.run(self._qasm(100))
         confint = result['confidence_interval']
-        self.assertEqual(confint, expected_confint)
+        np.testing.assert_almost_equal(confint, expected_confint)
         self.assertTrue(confint[0] <= result['estimation'] <= confint[1])
 
 

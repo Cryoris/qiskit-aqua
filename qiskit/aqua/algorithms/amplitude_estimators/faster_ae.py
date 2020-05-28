@@ -47,7 +47,9 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
 
     """
 
-    def __init__(self, N: Tuple[int, int], delta: float, maxiter: int,
+    def __init__(self, N: Optional[Tuple[int, int]] = None,
+                 delta: Optional[float] = None,
+                 maxiter: Optional[int] = None,
                  a_factory: Optional[CircuitFactory] = None,
                  q_factory: Optional[CircuitFactory] = None,
                  x_factory: Optional[CircuitFactory] = None,
@@ -87,10 +89,19 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
 
         return None
 
+    @x_factory.setter
+    def x_factory(self, x_factory: CircuitFactory) -> None:
+        """Set the X operator.
+
+        Args:
+            x_factory: The new X operator.
+        """
+        self._x_factory = x_factory
+
     @property
     def is_rescaled(self):
         """Check if the amplitude has been rescaled."""
-        return (self._q_factory is None)
+        return self._q_factory is None
 
     @property
     def q_factory(self) -> Optional[CircuitFactory]:
@@ -103,10 +114,20 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
             return self._q_factory
 
         if self._a_factory is not None:
-            s11 = S11Factory(self._a_factory.num_target_qubits)
+            s11 = S11Factory(self.x_factory.num_target_qubits)
             return QFactory(self.x_factory, s_psi_0_factory=s11)
 
         return None
+
+    @q_factory.setter
+    def q_factory(self, q_factory):
+        """
+        Set the Q operator as QFactory.
+
+        Args:
+            q_factory (QFactory): the specialized Q operator
+        """
+        self._q_factory = q_factory
 
     @property
     def i_objective(self) -> Optional[List[int]]:
@@ -118,10 +139,28 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         if self._i_objective is not None:
             return self._i_objective
 
+        if self._q_factory is not None:
+            i_objective = self._q_factory.i_objective
+            if not isinstance(i_objective, list):
+                return [i_objective]
+            return i_objective
+
         if self._a_factory is not None:
             return [self._a_factory.num_target_qubits - 1, self._a_factory.num_target_qubits]
 
+        if self._x_factory is not None:
+            return [self._x_factory.num_target_qubits - 2, self._x_factory.num_target_qubits - 1]
+
         return None
+
+    @i_objective.setter
+    def i_objective(self, i_objective: int) -> None:
+        """Set the index of the objective qubit, i.e. the qubit deciding between 'good/bad' states.
+
+        Args:
+            i_objective: the index
+        """
+        self._i_objective = i_objective
 
     def _cos_estimate(self, k, shots=1024):
         if self._quantum_instance is None:
@@ -249,13 +288,18 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         value = (rescaling * np.sin(theta)) ** 2
         value_ci = [(rescaling * np.sin(x)) ** 2 for x in theta_ci]
 
+        if self._a_factory is not None:
+            value_to_estimation = self._a_factory.value_to_estimation
+        else:
+            value_to_estimation = self._x_factory.value_to_estimation
+
         results = {
             'theta': theta,
             'theta_ci': theta_ci,
             'value': value,
             'value_ci': value_ci,
-            'estimate': self._a_factory.value_to_estimation(value),
-            'confint': [self._a_factory.value_to_estimation(x) for x in value_ci],
+            'estimation': value_to_estimation(value),
+            'confidence_interval': [value_to_estimation(x) for x in value_ci],
             'num_oracle_calls': self._num_oracle_calls,
             'theta_cis': theta_cis,
             'num_steps': num_steps,
@@ -300,4 +344,4 @@ class S11Factory(CircuitFactory):
 
     # pylint:disable=unused-argument
     def build(self, qc, q, q_ancillas=None, params=None):
-        qc.cz(q[self.num_target_qubits - 1], q[self.num_target_qubits])
+        qc.cz(q[self.num_target_qubits - 2], q[self.num_target_qubits - 1])
