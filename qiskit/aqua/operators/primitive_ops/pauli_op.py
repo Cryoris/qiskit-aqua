@@ -63,6 +63,11 @@ class PauliOp(PrimitiveOp):
     def num_qubits(self) -> int:
         return len(self.primitive)
 
+    def control(self, num_ctrl_qubits):
+        # check Pauli class
+        # control each of them
+        return CircuitOp(...)
+
     def add(self, other: OperatorBase) -> OperatorBase:
         if not self.num_qubits == other.num_qubits:
             raise ValueError(

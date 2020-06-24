@@ -67,6 +67,10 @@ class MatrixOp(PrimitiveOp):
 
         super().__init__(primitive, coeff=coeff)
 
+    def control(self):
+        controlled = block(id, self.primitive).to_qiskit_endianness()
+        return MatrixOp(controlled)
+
     def primitive_strings(self) -> Set[str]:
         return {'Matrix'}
 

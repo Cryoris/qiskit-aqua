@@ -96,6 +96,10 @@ class EvolvedOp(PrimitiveOp):
 
         return ComposedOp([self, other])
 
+    def control(self, num_ctrl_qubits):
+        # delegate to primitives and store number of controls
+        # the smart logic goes into the Trotterization
+
     def __str__(self) -> str:
         prim_str = str(self.primitive)
         if self.coeff == 1.0:

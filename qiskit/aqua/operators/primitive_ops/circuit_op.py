@@ -162,6 +162,9 @@ class CircuitOp(PrimitiveOp):
         else:
             return "{} * {}".format(self.coeff, prim_str)
 
+    def control(self):
+        return CircuitOp(self.primitive.control())
+
     def assign_parameters(self, param_dict: dict) -> OperatorBase:
         param_value = self.coeff
         qc = self.primitive
