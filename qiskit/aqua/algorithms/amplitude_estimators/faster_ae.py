@@ -275,11 +275,11 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
                 else:
                     cos = self._cos_estimate(2**(j - 1), self._shots[1])
                     cos_2 = self._cos_estimate(2 ** (j - 1) + 2 ** (j_0 - 1), self._shots[1])
-                    sin = (c * np.cos(v) - cos_2) / np.sin(v)
+                    sin = (cos * np.cos(v) - cos_2) / np.sin(v)
                     rho = np.arctan2(sin, cos)
-                    n = int(((2 ** (j + 1) + 2) * theta_ci[1] - rho) / (2 * np.pi))
+                    n = int(((2 ** (j + 1) + 2) * theta_ci[1] - rho + np.pi / 3) / (2 * np.pi))
 
-                    theta_ci = [(2 * np.pi * n + rho + sign * np.pi / 2) / (2 ** (j + 1) + 2)
+                    theta_ci = [(2 * np.pi * n + rho + sign * np.pi / 3) / (2 ** (j + 1) + 2)
                                 for sign in [-1, 1]]
                 theta_cis.append(theta_ci)
 
