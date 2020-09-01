@@ -47,7 +47,7 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
 
     """
 
-    def __init__(self, N: Optional[Tuple[int, int]] = None,
+    def __init__(self,
                  delta: Optional[float] = None,
                  maxiter: Optional[int] = None,
                  a_factory: Optional[CircuitFactory] = None,
@@ -57,7 +57,6 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
                  quantum_instance: Optional[Union[QuantumInstance, BaseBackend]] = None) -> None:
         r"""
         Args:
-            N: The number of shots for the first and second stage as tuple.
             delta: The probability that the true value is outside of the final confidence interval.
             maxiter: The number of iterations, the maximal power of Q is `2 ** (maxiter - 1)`.
             a_factory: The A operator constructing the amplitudes.
@@ -67,7 +66,7 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
             quantum_instance: The quantum instance or backend to run the circuits.
         """
         super().__init__(a_factory, q_factory, i_objective, quantum_instance)
-        self._shots = N
+        self._shots = (int(1944 * np.log(2 / delta)), int(972 * np.log(2 / delta)))
         self._delta = delta
         self._maxiter = maxiter
         self._num_oracle_calls = 0
@@ -255,6 +254,7 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         else:
             theta_ci = [0, np.arcsin(0.25)]
             first_stage = True
+            j_0 = self._maxiter
 
             theta_cis = []
             num_first_stage_steps = 0
@@ -304,6 +304,7 @@ class FasterAmplitudeEstimation(AmplitudeEstimationAlgorithm):
             'theta_cis': theta_cis,
             'num_steps': num_steps,
             'num_first_stage_steps': num_first_stage_steps,
+            'success_probability': 1 - (2 * self._maxiter - j_0) * self._delta
         }
 
         return results
