@@ -10,7 +10,7 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-""" MatrixOp Class """
+"""MatrixOp class."""
 
 from typing import Union, Optional, Set, Dict, List, cast
 import logging
@@ -35,13 +35,12 @@ logger = logging.getLogger(__name__)
 
 
 class MatrixOp(PrimitiveOp):
-    """ Class for Operators represented by matrices, backed by Terra's ``Operator`` module.
-
+    """Class for Operators represented by matrices, backed by Terra's ``Operator`` module.
     """
 
     def __init__(self,
-                 primitive: Union[list, np.ndarray, spmatrix, Operator] = None,
-                 coeff: Optional[Union[int, float, complex, ParameterExpression]] = 1.0) -> None:
+                 primitive: Union[list, np.ndarray, spmatrix, Operator],
+                 coeff: Union[int, float, complex, ParameterExpression] = 1.0) -> None:
         """
         Args:
             primitive: The matrix-like object which defines the behavior of the underlying function.

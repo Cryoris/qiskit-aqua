@@ -45,11 +45,11 @@ class PrimitiveOp(OperatorBase):
 
     """
 
-    @staticmethod
+    # @staticmethod
     # pylint: disable=unused-argument
     def __new__(cls,
                 primitive: Union[Instruction, QuantumCircuit, List,
-                                 np.ndarray, spmatrix, MatrixOperator, Pauli] = None,
+                                 np.ndarray, spmatrix, MatrixOperator, Pauli],
                 coeff: Union[int, float, complex, ParameterExpression] = 1.0) -> 'PrimitiveOp':
         """ A factory method to produce the correct type of PrimitiveOp subclass
         based on the primitive passed in. Primitive and coeff arguments are passed into
@@ -71,23 +71,23 @@ class PrimitiveOp(OperatorBase):
         # pylint: disable=cyclic-import,import-outside-toplevel
         if isinstance(primitive, (Instruction, QuantumCircuit)):
             from .circuit_op import CircuitOp
-            return CircuitOp.__new__(CircuitOp)
+            return CircuitOp.__new__(primitive, coeff)
 
         if isinstance(primitive, (list, np.ndarray, spmatrix, MatrixOperator)):
             from .matrix_op import MatrixOp
-            return MatrixOp.__new__(MatrixOp)
+            return MatrixOp.__new__(primitive, coeff)
 
         if isinstance(primitive, Pauli):
             from .pauli_op import PauliOp
-            return PauliOp.__new__(PauliOp)
+            return PauliOp.__new__(primitive, coeff)
 
         raise TypeError('Unsupported primitive type {} passed into PrimitiveOp '
                         'factory constructor'.format(type(primitive)))
 
     def __init__(self,
                  primitive: Union[Instruction, QuantumCircuit, List,
-                                  np.ndarray, spmatrix, MatrixOperator, Pauli] = None,
-                 coeff: Optional[Union[int, float, complex, ParameterExpression]] = 1.0) -> None:
+                                  np.ndarray, spmatrix, MatrixOperator, Pauli],
+                 coeff: Union[int, float, complex, ParameterExpression] = 1.0) -> None:
         """
             Args:
                 primitive: The operator primitive being wrapped.

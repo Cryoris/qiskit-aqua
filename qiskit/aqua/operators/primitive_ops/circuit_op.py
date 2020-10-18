@@ -10,7 +10,7 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-""" CircuitOp Class """
+"""CircuitOp Class."""
 
 from typing import Union, Optional, Set, List, Dict, cast
 import logging
@@ -30,14 +30,11 @@ logger = logging.getLogger(__name__)
 
 
 class CircuitOp(PrimitiveOp):
-    """ Class for Operators backed by Terra's ``QuantumCircuit`` module.
-
-    """
+    """Class for Operators backed by Terra's ``QuantumCircuit`` module."""
 
     def __init__(self,
-                 primitive: Union[Instruction, QuantumCircuit] = None,
-                 coeff: Optional[Union[int, float, complex,
-                                       ParameterExpression]] = 1.0) -> None:
+                 primitive: Union[Instruction, QuantumCircuit],
+                 coeff: Union[int, float, complex, ParameterExpression] = 1.0) -> None:
         """
         Args:
             primitive: The QuantumCircuit which defines the
