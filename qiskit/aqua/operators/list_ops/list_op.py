@@ -181,7 +181,8 @@ class ListOp(OperatorBase):
 
         if self.__class__ == ListOp:
             return ListOp([convert_fn(op) for op in self.oplist],  # type: ignore
-                          combo_fn=self.combo_fn, coeff=coeff, abelian=self.abelian)
+                          combo_fn=self.combo_fn, coeff=coeff, abelian=self.abelian,
+                          grad_combo_fn=self._grad_combo_fn )
         return self.__class__([convert_fn(op) for op in self.oplist],  # type: ignore
                               coeff=coeff, abelian=self.abelian)
 
