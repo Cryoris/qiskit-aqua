@@ -386,9 +386,9 @@ class TestSineIntegral(QiskitAquaTestCase):
 
     @idata([
         [AmplitudeEstimation(3), 'mle',
-         {'likelihood_ratio': [0.24947346406470136, 0.3003771197734433],
-          'fisher': [0.24861769995820207, 0.2999286066724035],
-          'observed_fisher': [0.24845622030041542, 0.30009008633019013]}
+         {'likelihood_ratio': (0.24947346406470136, 0.3003771197734433),
+          'fisher': (0.24861769995820207, 0.2999286066724035),
+          'observed_fisher': (0.24845622030041542, 0.30009008633019013)}
          ],
         [MaximumLikelihoodAmplitudeEstimation(3), 'estimation',
          {'likelihood_ratio': [0.25987941798909114, 0.27985361366769945],

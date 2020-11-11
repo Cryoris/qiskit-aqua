@@ -12,7 +12,7 @@
 
 """The Quantum Phase Estimation-based Amplitude Estimation algorithm."""
 
-from typing import Optional, Union, List, Tuple, Callable, Dict, Any
+from typing import Optional, Union, List, Tuple, Callable, Dict
 import logging
 import warnings
 from collections import OrderedDict
@@ -21,12 +21,10 @@ from scipy.stats import chi2, norm
 from scipy.optimize import bisect
 
 from qiskit import QuantumCircuit, ClassicalRegister
-from qiskit.circuit.library import QFT
 from qiskit.providers import BaseBackend
 from qiskit.providers import Backend
 from qiskit.aqua import QuantumInstance, AquaError
 from qiskit.aqua.utils import CircuitFactory
-from qiskit.aqua.circuits import PhaseEstimationCircuit
 from qiskit.aqua.utils.validation import validate_min
 from .ae_algorithm import AmplitudeEstimationAlgorithm, AmplitudeEstimationAlgorithmResult
 from .ae_utils import pdf_a, derivative_log_pdf_a, bisect_max
@@ -135,8 +133,7 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
         # NOTE removed deprecation warnings from IQFT, support removed as of August, 1st 2020
         self._iqft = iqft
         self._pec = phase_estimation_circuit
-        self._circuit = None
-        self._ret = {}  # type: Dict[str, Any]
+        self._last_result = None
 
     def construct_circuit(self, measurement: bool = False) -> QuantumCircuit:
         """Construct the Amplitude Estimation quantum circuit.
@@ -147,42 +144,28 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
         Returns:
             The QuantumCircuit object for the constructed circuit.
         """
-        if self.state_preparation is None:  # circuit factories
-            # ignore deprecation warnings from getter, user has already been warned when
-            # the a_factory has been passed
-            warnings.filterwarnings('ignore', category=DeprecationWarning)
-            q_factory = self.q_factory
-            warnings.filterwarnings('always', category=DeprecationWarning)
-
-            iqft = QFT(self._m, do_swaps=False, inverse=True) if self._iqft is None else self._iqft
-            pec = PhaseEstimationCircuit(
-                iqft=iqft, num_ancillae=self._m,
-                state_in_circuit_factory=self._a_factory,
-                unitary_circuit_factory=q_factory
-            )
-            self._circuit = pec.construct_circuit(measurement=measurement)
+        if self._pec is not None:
+            pec = self._pec
         else:
-            if self._pec is not None:
-                pec = self._pec
-            else:
-                from qiskit.circuit.library import PhaseEstimation
-                pec = PhaseEstimation(self._m, self.grover_operator, iqft=self._iqft)
+            from qiskit.circuit.library import PhaseEstimation
+            pec = PhaseEstimation(self._m, self.grover_operator, iqft=self._iqft)
 
-            # mypy thinks self.circuit is None even after explicitly being set to QuantumCircuit
-            self._circuit = QuantumCircuit(*pec.qregs)
-            self._circuit.compose(self.state_preparation,  # type: ignore
-                                  list(range(self._m, self._m + self.state_preparation.num_qubits)),
-                                  inplace=True)
-            self._circuit.compose(pec, inplace=True)  # type: ignore
+        circuit = QuantumCircuit(*pec.qregs)
+        circuit.compose(self.state_preparation,
+                        list(range(self._m, circuit.num_qubits)),
+                        inplace=True)
+        circuit.compose(pec, inplace=True)  # type: ignore
 
-            if measurement:
-                cr = ClassicalRegister(self._m)
-                self._circuit.add_register(cr)  # type: ignore
-                self._circuit.measure(list(range(self._m)), list(range(self._m)))  # type: ignore
+        if measurement:
+            cr = ClassicalRegister(self._m)
+            circuit.add_register(cr)  # type: ignore
+            circuit.measure(list(range(self._m)), list(range(self._m)))  # type: ignore
 
-        return self._circuit
+        return circuit
 
-    def _evaluate_statevector_results(self, probabilities: Union[List[float], np.ndarray]
+    def _evaluate_statevector_results(self,
+                                      num_qubits: int,
+                                      probabilities: Union[List[float], np.ndarray]
                                       ) -> Tuple[OrderedDict, OrderedDict]:
         """Evaluate the results from statevector simulation.
 
@@ -190,6 +173,7 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
         probabilities that the measurements y/gridpoints a are the best estimate.
 
         Args:
+            num_qubits: The total number of qubits in the QAE circuit.
             probabilities: The probabilities obtained from the statevector simulation,
                 i.e. real(statevector * statevector.conj())[0]
 
@@ -201,15 +185,10 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
             Dictionaries containing the a gridpoints with respective probabilities and
                 y measurements with respective probabilities, in this order.
         """
-        if self._circuit is None:
-            raise AquaError('Before calling _evaluate_statevector_results the construct_circuit '
-                            'method must be called, which sets the internal _circuit variable '
-                            'required in this method.')
-
         # map measured results to estimates
         y_samples = OrderedDict()  # type: OrderedDict
         for i, probability in enumerate(probabilities):
-            b = '{0:b}'.format(i).rjust(self._circuit.num_qubits, '0')[::-1]
+            b = '{0:b}'.format(i).rjust(num_qubits, '0')[::-1]
             y = int(b[:self._m], 2)
             y_samples[y] = y_samples.get(y, 0) + probability
 
@@ -275,6 +254,33 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
         # Convert the value to an estimation
         return a_opt
 
+    def confidence_interval(self, alpha: float, kind: str = 'likelihood_ratio'
+                            ) -> Tuple[float, float]:
+        """DEPRECATED. This method is now part of the results object.
+
+        Compute the (1 - alpha) confidence interval.
+
+        Args:
+            alpha: Confidence level: compute the (1 - alpha) confidence interval.
+            kind: The method to compute the confidence interval, can be 'fisher', 'observed_fisher'
+                or 'likelihood_ratio' (default)
+
+        Returns:
+            The (1 - alpha) confidence interval of the specified kind.
+
+        Raises:
+            AquaError: If the algorithm has not been run yet.
+        """
+        warnings.warn('The AmplitudeEstimation.confidence_interval method is deprecated as of '
+                      'Qiskit Aqua 0.9.0 and will be removed no earlier than 3 months after the '
+                      'release date. This method is now part of the result object.',
+                      DeprecationWarning, stacklevel=2)
+
+        if self._last_result is None:
+            raise AquaError('The algorithm must be executed before the confidence interval can '
+                            'be computed.')
+        return self._last_result.confidence_interval(alpha, kind)
+
     def estimate(self, estimation_problem: EstimationProblem) -> 'AmplitudeEstimationResult':
         """Run the amplitude estimation algorithm on provided estimation problem.
 
@@ -302,24 +308,25 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
         result.post_processing = estimation_problem.post_processing
 
         if self._quantum_instance.is_statevector:
-            self.construct_circuit(measurement=False)
+            circuit = self.construct_circuit(measurement=False)
             # run circuit on statevector simulator
-            statevector = self._quantum_instance.execute(self._circuit).get_statevector()
+            statevector = self._quantum_instance.execute(circuit).get_statevector()
             result.circuit_result = statevector
 
             # get state probabilities
             state_probabilities = np.real(statevector.conj() * statevector)
 
             # evaluate results
-            a_samples, y_samples = self._evaluate_statevector_results(state_probabilities)
+            a_samples, y_samples = self._evaluate_statevector_results(circuit.num_qubits,
+                                                                      state_probabilities)
 
             # store number of shots: convention is 1 shot for statevector,
             # needed so that MLE works!
             result.shots = 1
         else:
             # run circuit on QASM simulator
-            self.construct_circuit(measurement=True)
-            counts = self._quantum_instance.execute(self._circuit).get_counts()
+            circuit = self.construct_circuit(measurement=True)
+            counts = self._quantum_instance.execute(circuit).get_counts()
             result.circuit_result = counts
 
             # construct probabilities
@@ -365,6 +372,9 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
         a_sorted = sorted(list(a_samples.items()))
         result.mapped_values = [estimation_problem.post_processing(item[0]) for item in a_sorted]
         result.probabilities = [estimation_problem.post_processing(item[1]) for item in a_sorted]
+
+        # TODO remove this, once ``confidence_interval`` has reached the end of deprecation`
+        self._last_result = result
 
         return result
 
@@ -429,7 +439,7 @@ class AmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
         confint = self.ml_value + norm.ppf(1 - alpha / 2) / std * np.array([-1, 1])
 
         # transform the confidence interval from [0, 1] to the target interval
-        return (self.post_processing(bound) for bound in confint)
+        return tuple(self.post_processing(bound) for bound in confint)
 
     def _likelihood_ratio_confint(self, alpha: float) -> List[float]:
         """Compute the likelihood ratio confidence interval for the MLE of the previous run.
@@ -499,7 +509,7 @@ class AmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
 
         # Put together CI
         confint = [lower, upper]
-        return (self.post_processing(bound) for bound in confint)
+        return tuple(self.post_processing(bound) for bound in confint)
 
     def confidence_interval(self, alpha: float = 0.05, kind: str = 'likelihood_ratio'
                             ) -> Tuple[float, float]:
