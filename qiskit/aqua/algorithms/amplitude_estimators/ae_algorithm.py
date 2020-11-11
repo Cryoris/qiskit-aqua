@@ -12,24 +12,25 @@
 
 """The Amplitude Estimation Algorithm."""
 
-from typing import Optional, Union, List, Callable, Dict
+from typing import Optional, Union, List, Callable
 import logging
 import warnings
 from abc import abstractmethod
 
-from qiskit.circuit import QuantumCircuit
+from qiskit.circuit import QuantumCircuit, QuantumRegister, AncillaRegister
 from qiskit.circuit.library import GroverOperator
 from qiskit.providers import BaseBackend
 from qiskit.providers import Backend
 from qiskit.aqua import QuantumInstance
-from qiskit.aqua.algorithms import QuantumAlgorithm, AlgorithmResult
 from qiskit.aqua.utils import CircuitFactory
 from .q_factory import QFactory
+
+from .amplitude_estimator import AmplitudeEstimator, AmplitudeEstimatorResult
 
 logger = logging.getLogger(__name__)
 
 
-class AmplitudeEstimationAlgorithm(QuantumAlgorithm):
+class AmplitudeEstimationAlgorithm(AmplitudeEstimator):
     r"""The Quantum Amplitude Estimation (QAE) algorithm base class.
 
     In general, QAE algorithms aim to approximate the amplitude of a certain, marked state.
@@ -92,9 +93,15 @@ class AmplitudeEstimationAlgorithm(QuantumAlgorithm):
                           'this feature will be removed no earlier than 3 months after the '
                           'release. You should pass a QuantumCircuit instead.',
                           DeprecationWarning, stacklevel=2)
+            # store the circuit factory in ``a_factory```
             if isinstance(state_preparation, CircuitFactory):
                 a_factory = state_preparation
-                state_preparation = None
+
+            # and store the circuit in ``state_preparation```
+            qr = QuantumRegister(a_factory.num_target_qubits)
+            ar = AncillaRegister(a_factory.required_ancillas())
+            state_preparation = QuantumCircuit(qr, ar)
+            a_factory.build(state_preparation, qr, ar)
 
         if isinstance(grover_operator, CircuitFactory) or q_factory is not None:
             warnings.warn('Passing a CircuitFactory as Q operator is deprecated as of 0.8.0, '
@@ -103,7 +110,12 @@ class AmplitudeEstimationAlgorithm(QuantumAlgorithm):
                           DeprecationWarning, stacklevel=2)
             if isinstance(grover_operator, CircuitFactory):
                 q_factory = grover_operator
-                grover_operator = None
+
+            # and store the circuit in ``state_preparation```
+            qr = QuantumRegister(q_factory.num_target_qubits)
+            ar = AncillaRegister(q_factory.required_ancillas())
+            grover_operator = QuantumCircuit(qr, ar)
+            q_factory.build(grover_operator, qr, ar)
 
         if i_objective is not None:
             warnings.warn('The i_objective argument is deprecated as of 0.8.0 and will be removed '
@@ -376,61 +388,6 @@ class AmplitudeEstimationAlgorithm(QuantumAlgorithm):
         return self._post_processing(value)
 
 
-class AmplitudeEstimationAlgorithmResult(AlgorithmResult):
+class AmplitudeEstimationAlgorithmResult(AmplitudeEstimatorResult):
     """ AmplitudeEstimationAlgorithm Result."""
-
-    @property
-    def a_estimation(self) -> float:
-        """ return a_estimation """
-        return self.get('a_estimation')
-
-    @a_estimation.setter
-    def a_estimation(self, value: float) -> None:
-        """ set a_estimation """
-        self.data['a_estimation'] = value
-
-    @property
-    def estimation(self) -> float:
-        """ return estimation """
-        return self.get('estimation')
-
-    @estimation.setter
-    def estimation(self, value: float) -> None:
-        """ set estimation """
-        self.data['estimation'] = value
-
-    @property
-    def num_oracle_queries(self) -> int:
-        """ return num_oracle_queries """
-        return self.get('num_oracle_queries')
-
-    @num_oracle_queries.setter
-    def num_oracle_queries(self, value: int) -> None:
-        """ set num_oracle_queries """
-        self.data['num_oracle_queries'] = value
-
-    @property
-    def confidence_interval(self) -> List[float]:
-        """ return confidence_interval """
-        return self.get('confidence_interval')
-
-    @confidence_interval.setter
-    def confidence_interval(self, value: List[float]) -> None:
-        """ set confidence_interval """
-        self.data['confidence_interval'] = value
-
-    @staticmethod
-    def from_dict(a_dict: Dict) -> 'AmplitudeEstimationAlgorithmResult':
-        """ create new object from a dictionary """
-        return AmplitudeEstimationAlgorithmResult(a_dict)
-
-    def __getitem__(self, key: object) -> object:
-        if key == '95%_confidence_interval':
-            warnings.warn('95%_confidence_interval deprecated, use confidence_interval property.',
-                          DeprecationWarning)
-            return super().__getitem__('confidence_interval')
-        elif key == 'value':
-            warnings.warn('value deprecated, use a_estimation property.', DeprecationWarning)
-            return super().__getitem__('a_estimation')
-
-        return super().__getitem__(key)
+    pass

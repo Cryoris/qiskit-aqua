@@ -30,6 +30,7 @@ from qiskit.aqua.circuits import PhaseEstimationCircuit
 from qiskit.aqua.utils.validation import validate_min
 from .ae_algorithm import AmplitudeEstimationAlgorithm, AmplitudeEstimationAlgorithmResult
 from .ae_utils import pdf_a, derivative_log_pdf_a, bisect_max
+from .estimation_problem import EstimationProblem
 
 logger = logging.getLogger(__name__)
 
@@ -206,179 +207,23 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
                             'required in this method.')
 
         # map measured results to estimates
-        y_probabilities = OrderedDict()  # type: OrderedDict
+        y_samples = OrderedDict()  # type: OrderedDict
         for i, probability in enumerate(probabilities):
             b = '{0:b}'.format(i).rjust(self._circuit.num_qubits, '0')[::-1]
             y = int(b[:self._m], 2)
-            y_probabilities[y] = y_probabilities.get(y, 0) + probability
+            y_samples[y] = y_samples.get(y, 0) + probability
 
-        a_probabilities = OrderedDict()  # type: OrderedDict
-        for y, probability in y_probabilities.items():
+        a_samples = OrderedDict()  # type: OrderedDict
+        for y, probability in y_samples.items():
             if y >= int(self._M / 2):
                 y = self._M - y
             # due to the finite accuracy of the sine, we round the result to 7 decimals
             a = np.round(np.power(np.sin(y * np.pi / 2 ** self._m), 2), decimals=7)
-            a_probabilities[a] = a_probabilities.get(a, 0) + probability
+            a_samples[a] = a_samples.get(a, 0) + probability
 
-        return a_probabilities, y_probabilities
+        return a_samples, y_samples
 
-    def _compute_fisher_information(self, observed: bool = False) -> float:
-        """Computes the Fisher information for the output of the previous run.
-
-        Args:
-            observed: If True, the observed Fisher information is returned, otherwise
-                the expected Fisher information.
-
-        Returns:
-            The Fisher information.
-        """
-        fisher_information = None
-        mlv = self._ret['ml_value']  # MLE in [0,1]
-        m = self._m
-
-        if observed:
-            a_i = np.asarray(self._ret['values'])
-            p_i = np.asarray(self._ret['probabilities'])
-
-            # Calculate the observed Fisher information
-            fisher_information = sum(p * derivative_log_pdf_a(a, mlv, m) ** 2
-                                     for p, a in zip(p_i, a_i))
-        else:
-            def integrand(x):
-                return (derivative_log_pdf_a(x, mlv, m))**2 * pdf_a(x, mlv, m)
-
-            grid = np.sin(np.pi * np.arange(self._M / 2 + 1) / self._M) ** 2
-            fisher_information = sum(integrand(x) for x in grid)
-
-        return fisher_information
-
-    def _fisher_confint(self, alpha: float, observed: bool = False) -> List[float]:
-        """Compute the Fisher information confidence interval for the MLE of the previous run.
-
-        Args:
-            alpha: Specifies the (1 - alpha) confidence level (0 < alpha < 1).
-            observed: If True, the observed Fisher information is used to construct the
-                confidence interval, otherwise the expected Fisher information.
-
-        Returns:
-            The Fisher information confidence interval.
-        """
-        shots = self._ret['shots']
-        mle = self._ret['ml_value']
-
-        # approximate the standard deviation of the MLE and construct the confidence interval
-        std = np.sqrt(shots * self._compute_fisher_information(observed))
-        confint = mle + norm.ppf(1 - alpha / 2) / std * np.array([-1, 1])
-
-        # transform the confidence interval from [0, 1] to the target interval
-        return [self.post_processing(bound) for bound in confint]
-
-    def _likelihood_ratio_confint(self, alpha: float) -> List[float]:
-        """Compute the likelihood ratio confidence interval for the MLE of the previous run.
-
-        Args:
-            alpha: Specifies the (1 - alpha) confidence level (0 < alpha < 1).
-
-        Returns:
-            The likelihood ratio confidence interval.
-        """
-        # Compute the two intervals in which we the look for values above
-        # the likelihood ratio: the two bubbles next to the QAE estimate
-        M = self._M  # pylint: disable=invalid-name
-        qae = self._ret['value']
-
-        y = int(np.round(M * np.arcsin(np.sqrt(qae)) / np.pi))
-        if y == 0:
-            right_of_qae = np.sin(np.pi * (y + 1) / M)**2
-            bubbles = [qae, right_of_qae]
-
-        elif y == int(M / 2):  # remember, M = 2^m is a power of 2
-            left_of_qae = np.sin(np.pi * (y - 1) / M)**2
-            bubbles = [left_of_qae, qae]
-
-        else:
-            left_of_qae = np.sin(np.pi * (y - 1) / M)**2
-            right_of_qae = np.sin(np.pi * (y + 1) / M)**2
-            bubbles = [left_of_qae, qae, right_of_qae]
-
-        # likelihood function
-        a_i = np.asarray(self._ret['values'])
-        p_i = np.asarray(self._ret['probabilities'])
-        m = self._m
-        shots = self._ret['shots']
-
-        def loglikelihood(a):
-            return np.sum(shots * p_i * np.log(pdf_a(a_i, a, m)))
-
-        # The threshold above which the likelihoods are in the
-        # confidence interval
-        loglik_mle = loglikelihood(self._ret['ml_value'])
-        thres = loglik_mle - chi2.ppf(1 - alpha, df=1) / 2
-
-        def cut(x):
-            return loglikelihood(x) - thres
-
-        # Store the boundaries of the confidence interval
-        # It's valid to start off with the zero-width confidence interval, since the maximum
-        # of the likelihood function is guaranteed to be over the threshold, and if alpha = 0
-        # that's the valid interval
-        lower = upper = self._ret['ml_value']
-
-        # Check the two intervals/bubbles: check if they surpass the
-        # threshold and if yes add the part that does to the CI
-        for a, b in zip(bubbles[:-1], bubbles[1:]):
-            # Compute local maximum and perform a bisect search between
-            # the local maximum and the bubble boundaries
-            locmax, val = bisect_max(loglikelihood, a, b, retval=True)
-            if val >= thres:
-                # Bisect pre-condition is that the function has different
-                # signs at the boundaries of the interval we search in
-                if cut(a) * cut(locmax) < 0:
-                    left = bisect(cut, a, locmax)
-                    lower = np.minimum(lower, left)
-                if cut(locmax) * cut(b) < 0:
-                    right = bisect(cut, locmax, b)
-                    upper = np.maximum(upper, right)
-
-        # Put together CI
-        confint = [lower, upper]
-        return [self.post_processing(bound) for bound in confint]
-
-    def confidence_interval(self, alpha: float, kind: str = 'likelihood_ratio') -> List[float]:
-        """Compute the (1 - alpha) confidence interval.
-
-        Args:
-            alpha: Confidence level: compute the (1 - alpha) confidence interval.
-            kind: The method to compute the confidence interval, can be 'fisher', 'observed_fisher'
-                or 'likelihood_ratio' (default)
-
-        Returns:
-            The (1 - alpha) confidence interval of the specified kind.
-
-        Raises:
-            AquaError: If 'mle' is not in self._ret.keys() (i.e. `run` was not called yet).
-            NotImplementedError: If the confidence interval method `kind` is not implemented.
-        """
-        # check if AE did run already
-        if 'mle' not in self._ret.keys():
-            raise AquaError('Call run() first!')
-
-        # if statevector simulator the estimate is exact
-        if self._quantum_instance.is_statevector:
-            return 2 * [self._ret['mle']]
-
-        if kind in ['likelihood_ratio', 'lr']:
-            return self._likelihood_ratio_confint(alpha)
-
-        if kind in ['fisher', 'fi']:
-            return self._fisher_confint(alpha, observed=False)
-
-        if kind in ['observed_fisher', 'observed_information', 'oi']:
-            return self._fisher_confint(alpha, observed=True)
-
-        raise NotImplementedError('CI `{}` is not implemented.'.format(kind))
-
-    def _run_mle(self) -> None:
+    def _run_mle(self, qae, a_samples, shots) -> float:
         """Compute the Maximum Likelihood Estimator (MLE).
 
         Returns:
@@ -388,13 +233,12 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
             Before calling this method, call the method `run` of the AmplitudeEstimation instance.
         """
         M = self._M  # pylint: disable=invalid-name
-        qae = self._ret['value']
 
         # likelihood function
-        a_i = np.asarray(self._ret['values'])
-        p_i = np.asarray(self._ret['probabilities'])
+        a_i = np.asarray(list(a_samples.keys()))
+        p_i = np.asarray(list(a_samples.values()))
+
         m = self._m
-        shots = self._ret['shots']
 
         def loglikelihood(a):
             return np.sum(shots * p_i * np.log(pdf_a(a_i, a, m)))
@@ -429,127 +273,286 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
                 loglik_opt = val
 
         # Convert the value to an estimation
-        val_opt = self.post_processing(a_opt)
+        return a_opt
 
-        # Store MLE and the MLE mapped to an estimation
-        self._ret['ml_value'] = a_opt
-        self._ret['mle'] = val_opt
+    def estimate(self, estimation_problem: EstimationProblem) -> 'AmplitudeEstimationResult':
+        """Run the amplitude estimation algorithm on provided estimation problem.
 
-    def _run(self) -> 'AmplitudeEstimationResult':
+        Args:
+            estimation_problem: The estimation problem.
+
+        Returns:
+            An amplitude estimation results object.
+
+        Raises:
+            ValueError: If `state_preparation` or `objective_qubits` are not set in the
+                `estimation_problem`.
+        """
         # check if A factory or state_preparation has been set
-        if self.state_preparation is None:
-            if self._a_factory is None:  # getter emits deprecation warnings, therefore nest
-                raise AquaError('Either the state_preparation variable or the a_factory '
-                                '(deprecated) must be set to run the algorithm.')
+        if estimation_problem.state_preparation is None:
+            raise ValueError('The state_preparation property of the estimation problem must be '
+                             'set.')
+
+        if estimation_problem.objective_qubits is None:
+            raise ValueError('The objective_qubits property of the estimation problem must be '
+                             'set.')
+
+        result = AmplitudeEstimationResult()
+        result.num_evaluation_qubits = self._m
+        result.post_processing = estimation_problem.post_processing
 
         if self._quantum_instance.is_statevector:
             self.construct_circuit(measurement=False)
             # run circuit on statevector simulator
-            ret = self._quantum_instance.execute(self._circuit)
-            state_vector = np.asarray([ret.get_statevector(self._circuit)])
-            self._ret['statevector'] = state_vector
+            statevector = self._quantum_instance.execute(self._circuit).get_statevector()
+            result.circuit_result = statevector
 
             # get state probabilities
-            state_probabilities = np.real(state_vector.conj() * state_vector)[0]
+            state_probabilities = np.real(statevector.conj() * statevector)
 
             # evaluate results
-            a_probabilities, y_probabilities = self._evaluate_statevector_results(
-                state_probabilities)
+            a_samples, y_samples = self._evaluate_statevector_results(state_probabilities)
 
             # store number of shots: convention is 1 shot for statevector,
             # needed so that MLE works!
-            self._ret['shots'] = 1
+            result.shots = 1
         else:
             # run circuit on QASM simulator
             self.construct_circuit(measurement=True)
-            ret = self._quantum_instance.execute(self._circuit)
-
-            # get counts
-            self._ret['counts'] = ret.get_counts()
+            counts = self._quantum_instance.execute(self._circuit).get_counts()
+            result.circuit_result = counts
 
             # construct probabilities
-            y_probabilities = OrderedDict()
-            a_probabilities = OrderedDict()
+            y_samples = OrderedDict()
+            a_samples = OrderedDict()
             shots = self._quantum_instance._run_config.shots
 
-            for state, counts in ret.get_counts().items():
+            for state, counts in counts.items():
                 y = int(state.replace(' ', '')[:self._m][::-1], 2)
                 probability = counts / shots
-                y_probabilities[y] = probability
-                a = np.round(np.power(np.sin(y * np.pi / 2 ** self._m), 2),
-                             decimals=7)
-                a_probabilities[a] = a_probabilities.get(a, 0.0) + probability
+                y_samples[y] = probability
+                a = np.round(np.power(np.sin(y * np.pi / 2 ** self._m), 2), decimals=7)
+                a_samples[a] = a_samples.get(a, 0.0) + probability
 
             # store shots
-            self._ret['shots'] = shots
+            result.shots = shots
 
         # construct a_items and y_items
-        a_items = [(a, p) for (a, p) in a_probabilities.items() if p > 1e-6]
-        y_items = [(y, p) for (y, p) in y_probabilities.items() if p > 1e-6]
-        a_items = list(a_probabilities.items())
-        y_items = list(y_probabilities.items())
-        a_items = sorted(a_items)
-        y_items = sorted(y_items)
-        self._ret['a_items'] = a_items
-        self._ret['y_items'] = y_items
+        a_samples = {a: p for a, p in a_samples.items() if p > 1e-6}
+        y_samples = {y: p for y, p in y_samples.items() if p > 1e-6}
 
-        # map estimated values to original range and extract probabilities
-        self._ret['mapped_values'] = [self.post_processing(
-            a_item[0]) for a_item in self._ret['a_items']]
-        self._ret['values'] = [a_item[0] for a_item in self._ret['a_items']]
-        self._ret['y_values'] = [y_item[0] for y_item in y_items]
-        self._ret['probabilities'] = [a_item[1]
-                                      for a_item in self._ret['a_items']]
-        self._ret['mapped_items'] = [(self._ret['mapped_values'][i], self._ret['probabilities'][i])
-                                     for i in range(len(self._ret['mapped_values']))]
+        result.a_samples = a_samples
+        result.mapped_a_samples = {estimation_problem.post_processing(a): p
+                                   for a, p in a_samples.items()}
+        result.measurements = y_samples
 
-        # determine most likely estimator
-        self._ret['value'] = None  # estimate in [0,1]
-        self._ret['estimation'] = None  # estimate mapped to right interval
-        self._ret['max_probability'] = 0
-        for val, (est, prob) in zip(self._ret['values'], self._ret['mapped_items']):
-            if prob > self._ret['max_probability']:
-                self._ret['max_probability'] = prob
-                self._ret['estimation'] = est
-                self._ret['value'] = val
+        # determine the most likely estimate
+        result.max_probability = 0
+        for amplitude, (mapped, prob) in zip(a_samples.keys(), result.mapped_a_samples.items()):
+            if prob > result.max_probability:
+                result.max_probability = prob
+                result.a_estimation = amplitude
+                result.estimation = mapped
 
-        # count the number of Q-oracle calls
-        self._ret['num_oracle_queries'] = self._ret['shots'] * (self._M - 1)
+        # store the number of oracle queries
+        result.num_oracle_queries = result.shots * (self._M - 1)
 
-        # get MLE
-        self._run_mle()
+        # run the MLE post processing
+        a_mle = self._run_mle(result.a_estimation, result.a_samples, result.shots)
+        result.ml_value = a_mle
+        result.mle = estimation_problem.post_processing(a_mle)
 
-        # get 95% confidence interval
-        alpha = 0.05
-        kind = 'likelihood_ratio'  # empirically the most precise kind
-        self._ret['95%_confidence_interval'] = self.confidence_interval(alpha, kind)
+        a_sorted = sorted(list(a_samples.items()))
+        result.mapped_values = [estimation_problem.post_processing(item[0]) for item in a_sorted]
+        result.probabilities = [estimation_problem.post_processing(item[1]) for item in a_sorted]
 
-        ae_result = AmplitudeEstimationAlgorithmResult()
-        ae_result.a_estimation = self._ret['value']
-        ae_result.estimation = self._ret['estimation']
-        ae_result.num_oracle_queries = self._ret['num_oracle_queries']
-        ae_result.confidence_interval = self._ret['95%_confidence_interval']
-
-        result = AmplitudeEstimationResult()
-        result.combine(ae_result)
-        result.ml_value = self._ret['ml_value']
-        result.mapped_a_samples = self._ret['values']
-        result.probabilities = self._ret['probabilities']
-        result.shots = self._ret['shots']
-        result.mle = self._ret['mle']
-        if 'statevector' in self._ret:
-            result.circuit_result = self._ret['statevector']
-        elif 'counts' in self._ret:
-            result.circuit_result = dict(self._ret['counts'])
-        result.a_samples = self._ret['a_items']
-        result.y_measurements = self._ret['y_items']
-        result.mapped_values = self._ret['mapped_values']
-        result.max_probability = self._ret['max_probability']
         return result
+
+    def _run(self) -> Dict:
+        if self.state_preparation is None:
+            raise AquaError('Either the state_preparation variable or the a_factory '
+                            '(deprecated) must be set to run the algorithm.')
+
+        # TODO  construct estimation problem class and run estimate
+        estimation_problem = EstimationProblem(self.state_preparation, self.grover_operator,
+                                               self.objective_qubits, self.post_processing)
+        return self.estimate(estimation_problem)
 
 
 class AmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
     """ AmplitudeEstimation Result."""
+
+    def _compute_fisher_information(self, observed: bool = False) -> float:
+        """Computes the Fisher information for the output of the previous run.
+
+        Args:
+            observed: If True, the observed Fisher information is returned, otherwise
+                the expected Fisher information.
+
+        Returns:
+            The Fisher information.
+        """
+        fisher_information = None
+        mlv = self.ml_value  # MLE in [0,1]
+        m = self.num_evaluation_qubits
+        M = 2 ** m  # pylint: disable=invalid-name
+
+        if observed:
+            a_i = np.asarray(list(self.a_samples.keys()))
+            p_i = np.asarray(list(self.a_samples.values()))
+
+            # Calculate the observed Fisher information
+            fisher_information = sum(p * derivative_log_pdf_a(a, mlv, m) ** 2
+                                     for p, a in zip(p_i, a_i))
+        else:
+            def integrand(x):
+                return (derivative_log_pdf_a(x, mlv, m))**2 * pdf_a(x, mlv, m)
+
+            grid = np.sin(np.pi * np.arange(M / 2 + 1) / M) ** 2
+            fisher_information = sum(integrand(x) for x in grid)
+
+        return fisher_information
+
+    def _fisher_confint(self, alpha: float, observed: bool = False) -> List[float]:
+        """Compute the Fisher information confidence interval for the MLE of the previous run.
+
+        Args:
+            alpha: Specifies the (1 - alpha) confidence level (0 < alpha < 1).
+            observed: If True, the observed Fisher information is used to construct the
+                confidence interval, otherwise the expected Fisher information.
+
+        Returns:
+            The Fisher information confidence interval.
+        """
+        # approximate the standard deviation of the MLE and construct the confidence interval
+        std = np.sqrt(self.shots * self._compute_fisher_information(observed))
+        confint = self.ml_value + norm.ppf(1 - alpha / 2) / std * np.array([-1, 1])
+
+        # transform the confidence interval from [0, 1] to the target interval
+        return (self.post_processing(bound) for bound in confint)
+
+    def _likelihood_ratio_confint(self, alpha: float) -> List[float]:
+        """Compute the likelihood ratio confidence interval for the MLE of the previous run.
+
+        Args:
+            alpha: Specifies the (1 - alpha) confidence level (0 < alpha < 1).
+
+        Returns:
+            The likelihood ratio confidence interval.
+        """
+        # Compute the two intervals in which we the look for values above
+        # the likelihood ratio: the two bubbles next to the QAE estimate
+        m = self.num_evaluation_qubits
+        M = 2 ** m  # pylint: disable=invalid-name
+        qae = self.estimation
+
+        y = int(np.round(M * np.arcsin(np.sqrt(qae)) / np.pi))
+        if y == 0:
+            right_of_qae = np.sin(np.pi * (y + 1) / M)**2
+            bubbles = [qae, right_of_qae]
+
+        elif y == int(M / 2):  # remember, M = 2^m is a power of 2
+            left_of_qae = np.sin(np.pi * (y - 1) / M)**2
+            bubbles = [left_of_qae, qae]
+
+        else:
+            left_of_qae = np.sin(np.pi * (y - 1) / M)**2
+            right_of_qae = np.sin(np.pi * (y + 1) / M)**2
+            bubbles = [left_of_qae, qae, right_of_qae]
+
+        # likelihood function
+        a_i = np.asarray(list(self.a_samples.keys()))
+        p_i = np.asarray(list(self.a_samples.values()))
+
+        def loglikelihood(a):
+            return np.sum(self.shots * p_i * np.log(pdf_a(a_i, a, m)))
+
+        # The threshold above which the likelihoods are in the
+        # confidence interval
+        loglik_mle = loglikelihood(self.ml_value)
+        thres = loglik_mle - chi2.ppf(1 - alpha, df=1) / 2
+
+        def cut(x):
+            return loglikelihood(x) - thres
+
+        # Store the boundaries of the confidence interval
+        # It's valid to start off with the zero-width confidence interval, since the maximum
+        # of the likelihood function is guaranteed to be over the threshold, and if alpha = 0
+        # that's the valid interval
+        lower = upper = self.ml_value
+
+        # Check the two intervals/bubbles: check if they surpass the
+        # threshold and if yes add the part that does to the CI
+        for a, b in zip(bubbles[:-1], bubbles[1:]):
+            # Compute local maximum and perform a bisect search between
+            # the local maximum and the bubble boundaries
+            locmax, val = bisect_max(loglikelihood, a, b, retval=True)
+            if val >= thres:
+                # Bisect pre-condition is that the function has different
+                # signs at the boundaries of the interval we search in
+                if cut(a) * cut(locmax) < 0:
+                    left = bisect(cut, a, locmax)
+                    lower = np.minimum(lower, left)
+                if cut(locmax) * cut(b) < 0:
+                    right = bisect(cut, locmax, b)
+                    upper = np.maximum(upper, right)
+
+        # Put together CI
+        confint = [lower, upper]
+        return (self.post_processing(bound) for bound in confint)
+
+    def confidence_interval(self, alpha: float = 0.05, kind: str = 'likelihood_ratio'
+                            ) -> Tuple[float, float]:
+        """Compute the (1 - alpha) confidence interval.
+
+        Args:
+            alpha: Confidence level: compute the (1 - alpha) confidence interval.
+            kind: The method to compute the confidence interval, can be 'fisher', 'observed_fisher'
+                or 'likelihood_ratio' (default)
+
+        Returns:
+            The (1 - alpha) confidence interval of the specified kind.
+
+        Raises:
+            AquaError: If 'mle' is not in self._ret.keys() (i.e. `run` was not called yet).
+            NotImplementedError: If the confidence interval method `kind` is not implemented.
+        """
+        # if statevector simulator the estimate is exact
+        if isinstance(self.circuit_result, (list, np.ndarray)):
+            return (self.mle, self.mle)
+
+        if kind in ['likelihood_ratio', 'lr']:
+            return self._likelihood_ratio_confint(alpha)
+
+        if kind in ['fisher', 'fi']:
+            return self._fisher_confint(alpha, observed=False)
+
+        if kind in ['observed_fisher', 'observed_information', 'oi']:
+            return self._fisher_confint(alpha, observed=True)
+
+        raise NotImplementedError('CI `{}` is not implemented.'.format(kind))
+
+    @property
+    def post_processing(self) -> Callable[[float], float]:
+        """ returns post_processing """
+        return self._post_processing
+        # return self.get('post_processing')
+
+    @post_processing.setter
+    def post_processing(self, post_processing: Callable[[float], float]) -> None:
+        """ sets post_processing """
+        self._post_processing = post_processing
+        # self.data['post_processing'] = post_processing
+
+    @property
+    def num_evaluation_qubits(self) -> int:
+        """ returns num_evaluation_qubits """
+        return self.get('num_evaluation_qubits')
+
+    @num_evaluation_qubits.setter
+    def num_evaluation_qubits(self, num_evaluation_qubits: int) -> None:
+        """ sets num_evaluation_qubits """
+        self.data['num_evaluation_qubits'] = num_evaluation_qubits
 
     @property
     def ml_value(self) -> float:
@@ -612,22 +615,22 @@ class AmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
         self.data['circuit_result'] = value
 
     @property
-    def a_samples(self) -> List[Tuple[float, float]]:
+    def a_samples(self) -> Dict[float, float]:
         """ return a_samples """
         return self.get('a_samples')
 
     @a_samples.setter
-    def a_samples(self, value: List[Tuple[float, float]]) -> None:
+    def a_samples(self, value: Dict[float, float]) -> None:
         """ set a_samples """
         self.data['a_samples'] = value
 
     @property
-    def y_measurements(self) -> List[Tuple[int, float]]:
+    def measurements(self) -> Dict[int, float]:
         """ return y_measurements """
         return self.get('y_measurements')
 
-    @y_measurements.setter
-    def y_measurements(self, value: List[Tuple[int, float]]) -> None:
+    @measurements.setter
+    def measurements(self, value: Dict[int, float]) -> None:
         """ set y_measurements """
         self.data['y_measurements'] = value
 
@@ -668,7 +671,7 @@ class AmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
             warnings.warn('values deprecated, use mapped_a_samples property.', DeprecationWarning)
             return super().__getitem__('mapped_a_samples')
         elif key == 'y_items':
-            warnings.warn('y_items deprecated, use y_measurements property.', DeprecationWarning)
+            warnings.warn('y_items deprecated, use measurements property.', DeprecationWarning)
             return super().__getitem__('y_measurements')
         elif key == 'a_items':
             warnings.warn('a_items deprecated, use a_samples property.', DeprecationWarning)

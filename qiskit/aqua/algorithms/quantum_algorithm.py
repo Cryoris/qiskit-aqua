@@ -35,7 +35,7 @@ class QuantumAlgorithm(ABC):
     @abstractmethod
     def __init__(self,
                  quantum_instance: Optional[
-                     Union[QuantumInstance, Backend, BaseBackend, Backend]]) -> None:
+                     Union[QuantumInstance, Backend, BaseBackend]]) -> None:
         self._quantum_instance = None
         if quantum_instance:
             self.quantum_instance = quantum_instance
