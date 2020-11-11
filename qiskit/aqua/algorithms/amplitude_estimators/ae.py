@@ -135,31 +135,38 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
         self._pec = phase_estimation_circuit
         self._last_result = None
 
-    def construct_circuit(self, measurement: bool = False) -> QuantumCircuit:
+    def construct_circuit(self, estimation_problem: Optional[EstimationProblem] = None,
+                          measurement: bool = False) -> QuantumCircuit:
         """Construct the Amplitude Estimation quantum circuit.
 
         Args:
+            estimation_problem: The estimation problem for which to construct the QAE circuit.
             measurement: Boolean flag to indicate if measurements should be included in the circuit.
 
         Returns:
             The QuantumCircuit object for the constructed circuit.
         """
+        if isinstance(estimation_problem, bool):
+            warnings.warn('The first argument of construct_circuit is now an estimation problem.')
+        elif estimation_problem is None:
+            warnings.warn('In future, construct_circuit must be passed an optimization problem.')
+
         if self._pec is not None:
             pec = self._pec
         else:
             from qiskit.circuit.library import PhaseEstimation
-            pec = PhaseEstimation(self._m, self.grover_operator, iqft=self._iqft)
+            pec = PhaseEstimation(self._m, estimation_problem.grover_operator, iqft=self._iqft)
 
         circuit = QuantumCircuit(*pec.qregs)
-        circuit.compose(self.state_preparation,
+        circuit.compose(estimation_problem.state_preparation,
                         list(range(self._m, circuit.num_qubits)),
                         inplace=True)
-        circuit.compose(pec, inplace=True)  # type: ignore
+        circuit.compose(pec, inplace=True)
 
         if measurement:
             cr = ClassicalRegister(self._m)
-            circuit.add_register(cr)  # type: ignore
-            circuit.measure(list(range(self._m)), list(range(self._m)))  # type: ignore
+            circuit.add_register(cr)
+            circuit.measure(list(range(self._m)), list(range(self._m)))
 
         return circuit
 
@@ -308,7 +315,7 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
         result.post_processing = estimation_problem.post_processing
 
         if self._quantum_instance.is_statevector:
-            circuit = self.construct_circuit(measurement=False)
+            circuit = self.construct_circuit(estimation_problem, measurement=False)
             # run circuit on statevector simulator
             statevector = self._quantum_instance.execute(circuit).get_statevector()
             result.circuit_result = statevector
@@ -325,7 +332,7 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
             result.shots = 1
         else:
             # run circuit on QASM simulator
-            circuit = self.construct_circuit(measurement=True)
+            circuit = self.construct_circuit(estimation_problem, measurement=True)
             counts = self._quantum_instance.execute(circuit).get_counts()
             result.circuit_result = counts
 
