@@ -148,8 +148,13 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
         """
         if isinstance(estimation_problem, bool):
             warnings.warn('The first argument of construct_circuit is now an estimation problem.')
+            measurement = estimation_problem
         elif estimation_problem is None:
-            warnings.warn('In future, construct_circuit must be passed an optimization problem.')
+            warnings.warn('In future, construct_circuit must be passed an estimation problem.')
+
+        if estimation_problem is None:
+            estimation_problem = EstimationProblem(self.state_preparation, self.grover_operator,
+                                                   self.objective_qubits)
 
         if self._pec is not None:
             pec = self._pec
@@ -390,7 +395,6 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
             raise AquaError('Either the state_preparation variable or the a_factory '
                             '(deprecated) must be set to run the algorithm.')
 
-        # TODO  construct estimation problem class and run estimate
         estimation_problem = EstimationProblem(self.state_preparation, self.grover_operator,
                                                self.objective_qubits, self.post_processing)
         return self.estimate(estimation_problem)
@@ -548,18 +552,6 @@ class AmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
             return self._fisher_confint(alpha, observed=True)
 
         raise NotImplementedError('CI `{}` is not implemented.'.format(kind))
-
-    @property
-    def post_processing(self) -> Callable[[float], float]:
-        """ returns post_processing """
-        return self._post_processing
-        # return self.get('post_processing')
-
-    @post_processing.setter
-    def post_processing(self, post_processing: Callable[[float], float]) -> None:
-        """ sets post_processing """
-        self._post_processing = post_processing
-        # self.data['post_processing'] = post_processing
 
     @property
     def num_evaluation_qubits(self) -> int:

@@ -426,7 +426,7 @@ class TestSineIntegral(QiskitAquaTestCase):
         """End-to-end test for the IQAE confidence interval."""
         n = 3
         qae = IterativeAmplitudeEstimation(0.1, 0.01, state_preparation=SineIntegral(n))
-        expected_confint = [0.19840508760087738, 0.35110155403424115]
+        expected_confint = (0.19840508760087738, 0.35110155403424115)
 
         # statevector simulator
         result = qae.run(self._statevector)

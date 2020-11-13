@@ -14,7 +14,7 @@
 
 import warnings
 from abc import abstractmethod
-from typing import Union, Optional, List, Dict
+from typing import Union, Optional, Dict, Callable
 from qiskit.providers import BaseBackend, Backend
 from qiskit.aqua import QuantumInstance
 from qiskit.aqua.algorithms import AlgorithmResult, QuantumAlgorithm
@@ -30,7 +30,7 @@ class AmplitudeEstimator(QuantumAlgorithm):
                  ) -> None:
         super().__init__(quantum_instance)
 
-    # @abstractmethod
+    @abstractmethod
     def estimate(self, estimation_problem: EstimationProblem) -> 'AmplitudeEstimatorResult':
         """Run the amplitude estimation algorithm.
 
@@ -74,14 +74,16 @@ class AmplitudeEstimatorResult(AlgorithmResult):
         self.data['num_oracle_queries'] = value
 
     @property
-    def confidence_interval(self) -> List[float]:
-        """ return confidence_interval """
-        return self.get('confidence_interval')
+    def post_processing(self) -> Callable[[float], float]:
+        """ returns post_processing """
+        return self._post_processing
+        # return self.get('post_processing')
 
-    @confidence_interval.setter
-    def confidence_interval(self, value: List[float]) -> None:
-        """ set confidence_interval """
-        self.data['confidence_interval'] = value
+    @post_processing.setter
+    def post_processing(self, post_processing: Callable[[float], float]) -> None:
+        """ sets post_processing """
+        self._post_processing = post_processing
+        # self.data['post_processing'] = post_processing
 
     @staticmethod
     def from_dict(a_dict: Dict) -> 'AmplitudeEstimationAlgorithmResult':

@@ -476,6 +476,9 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         # TODO implement a **reliable**, fast method to find the maximum of the likelihood function
         return self._compute_mle_safe()
 
+    def estimate(self, estimation_problem):
+        return 0
+
     def _run(self) -> 'MaximumLikelihoodAmplitudeEstimationResult':
         # check if A factory or state_preparation has been set
         if self.state_preparation is None:

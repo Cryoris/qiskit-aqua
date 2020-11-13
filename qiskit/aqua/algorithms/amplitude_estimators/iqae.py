@@ -19,7 +19,7 @@ import logging
 import numpy as np
 from scipy.stats import beta
 
-from qiskit import ClassicalRegister, QuantumRegister, QuantumCircuit
+from qiskit import ClassicalRegister, QuantumCircuit
 from qiskit.providers import BaseBackend
 from qiskit.providers import Backend
 from qiskit.aqua import QuantumInstance, AquaError
@@ -27,6 +27,7 @@ from qiskit.aqua.utils.circuit_factory import CircuitFactory
 from qiskit.aqua.utils.validation import validate_range, validate_in_set
 
 from .ae_algorithm import AmplitudeEstimationAlgorithm, AmplitudeEstimationAlgorithmResult
+from .estimation_problem import EstimationProblem
 
 logger = logging.getLogger(__name__)
 
@@ -203,13 +204,15 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         # if we do not find a feasible k, return the old one
         return int(k), upper_half_circle
 
-    def construct_circuit(self, k: int, measurement: bool = False) -> QuantumCircuit:
+    def construct_circuit(self, estimation_problem: Optional[EstimationProblem] = None,
+                          k: int = 0, measurement: bool = False) -> QuantumCircuit:
         r"""Construct the circuit Q^k A \|0>.
 
         The A operator is the unitary specifying the QAE problem and Q the associated Grover
         operator.
 
         Args:
+            estimation_problem: The estimation problem for which to construct the QAE circuit.
             k: The power of the Q operator.
             measurement: Boolean flag to indicate if measurements should be included in the
                 circuits.
@@ -217,60 +220,44 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         Returns:
             The circuit Q^k A \|0>.
         """
-        if self.state_preparation is not None:   # using circuits, not CircuitFactory
-            num_qubits = max(self.state_preparation.num_qubits, self.grover_operator.num_qubits)
-            circuit = QuantumCircuit(num_qubits, name='circuit')
+        if isinstance(estimation_problem, int):
+            warnings.warn('The first argument of construct_circuit is now an estimation problem.')
+            if isinstance(k, bool):
+                measurement = k
+            k = estimation_problem
+            estimation_problem = None
+        elif estimation_problem is None:
+            warnings.warn('In future, construct_circuit must be passed an optimization problem.')
 
-            if self._initial_state is not None:
-                circuit.compose(self._initial_state, inplace=True)
+        if estimation_problem is None:
+            estimation_problem = EstimationProblem(self.state_preparation, self.grover_operator,
+                                                   self.objective_qubits)
 
-            # add classical register if needed
-            if measurement:
-                c = ClassicalRegister(len(self.objective_qubits))
-                circuit.add_register(c)
+        num_qubits = max(estimation_problem.state_preparation.num_qubits,
+                         estimation_problem.grover_operator.num_qubits)
+        circuit = QuantumCircuit(num_qubits, name='circuit')
 
-            # add A operator
-            circuit.compose(self.state_preparation, inplace=True)
+        if self._initial_state is not None:
+            circuit.compose(self._initial_state, inplace=True)
 
-            # add Q^k
-            if k != 0:
-                circuit.compose(self.grover_operator.power(k), inplace=True)
-        else:  # deprecated CircuitFactory
-            q = QuantumRegister(self._a_factory.num_target_qubits, 'q')
-            circuit = QuantumCircuit(q, name='circuit')
+        # add classical register if needed
+        if measurement:
+            c = ClassicalRegister(len(estimation_problem.objective_qubits))
+            circuit.add_register(c)
 
-            warnings.filterwarnings('ignore', category=DeprecationWarning)
-            q_factory = self.q_factory
-            warnings.filterwarnings('always', category=DeprecationWarning)
+        # add A operator
+        circuit.compose(estimation_problem.state_preparation, inplace=True)
 
-            # get number of ancillas and add register if needed
-            num_ancillas = np.maximum(self._a_factory.required_ancillas(),
-                                      q_factory.required_ancillas())
-
-            q_aux = None
-            # pylint: disable=comparison-with-callable
-            if num_ancillas > 0:
-                q_aux = QuantumRegister(num_ancillas, 'aux')
-                circuit.add_register(q_aux)
-
-            # add classical register if needed
-            if measurement:
-                c = ClassicalRegister(1)
-                circuit.add_register(c)
-
-            # add A operator
-            self._a_factory.build(circuit, q, q_aux)
-
-            # add Q^k
-            if k != 0:
-                q_factory.build_power(circuit, q, k, q_aux)
+        # add Q^k
+        if k != 0:
+            circuit.compose(estimation_problem.grover_operator.power(k), inplace=True)
 
             # add optional measurement
         if measurement:
             # real hardware can currently not handle operations after measurements, which might
             # happen if the circuit gets transpiled, hence we're adding a safeguard-barrier
             circuit.barrier()
-            circuit.measure(self.objective_qubits, *c)
+            circuit.measure(estimation_problem.objective_qubits, *c)
 
         return circuit
 
@@ -307,61 +294,18 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
 
             return prob
 
-    def _chernoff_confint(self, value: float, shots: int, max_rounds: int, alpha: float
-                          ) -> Tuple[float, float]:
-        """Compute the Chernoff confidence interval for `shots` i.i.d. Bernoulli trials.
-
-        The confidence interval is
-
-            [value - eps, value + eps], where eps = sqrt(3 * log(2 * max_rounds/ alpha) / shots)
-
-        but at most [0, 1].
-
-        Args:
-            value: The current estimate.
-            shots: The number of shots.
-            max_rounds: The maximum number of rounds, used to compute epsilon_a.
-            alpha: The confidence level, used to compute epsilon_a.
-
-        Returns:
-            The Chernoff confidence interval.
-        """
-        eps = np.sqrt(3 * np.log(2 * max_rounds / alpha) / shots)
-        lower = np.maximum(0, value - eps)
-        upper = np.minimum(1, value + eps)
-        return lower, upper
-
-    def _clopper_pearson_confint(self, counts: int, shots: int, alpha: float
-                                 ) -> Tuple[float, float]:
-        """Compute the Clopper-Pearson confidence interval for `shots` i.i.d. Bernoulli trials.
-
-        Args:
-            counts: The number of positive counts.
-            shots: The number of shots.
-            alpha: The confidence level for the confidence interval.
-
-        Returns:
-            The Clopper-Pearson confidence interval.
-        """
-        lower, upper = 0, 1
-
-        # if counts == 0, the beta quantile returns nan
-        if counts != 0:
-            lower = beta.ppf(alpha / 2, counts, shots - counts + 1)
-
-        # if counts == shots, the beta quantile returns nan
-        if counts != shots:
-            upper = beta.ppf(1 - alpha / 2, counts + 1, shots - counts)
-
-        return lower, upper
-
     def _run(self) -> 'IterativeAmplitudeEstimationResult':
         # check if A factory or state_preparation has been set
         if self.state_preparation is None:
-            if self._a_factory is None:  # getter emits deprecation warnings, therefore nest
-                raise AquaError('Either the state_preparation variable or the a_factory '
-                                '(deprecated) must be set to run the algorithm.')
+            raise AquaError('Either the state_preparation variable or the a_factory '
+                            '(deprecated) must be set to run the algorithm.')
 
+        estimation_problem = EstimationProblem(self.state_preparation, self.grover_operator,
+                                               self.objective_qubits, self.post_processing)
+        return self.estimate(estimation_problem)
+
+    def estimate(self, estimation_problem: EstimationProblem
+                 ) -> 'IterativeAmplitudeEstimationResult':
         # initialize memory variables
         powers = [0]  # list of powers k: Q^k, (called 'k' in paper)
         ratios = []  # list of multiplication factors (called 'q' in paper)
@@ -441,11 +385,11 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
 
                 # compute a_min_i, a_max_i
                 if self._confint_method == 'chernoff':
-                    a_i_min, a_i_max = self._chernoff_confint(prob, round_shots, max_rounds,
-                                                              self._alpha)
+                    a_i_min, a_i_max = _chernoff_confint(prob, round_shots, max_rounds,
+                                                         self._alpha)
                 else:  # 'beta'
-                    a_i_min, a_i_max = self._clopper_pearson_confint(round_one_counts, round_shots,
-                                                                     self._alpha / max_rounds)
+                    a_i_min, a_i_max = _clopper_pearson_confint(round_one_counts, round_shots,
+                                                                self._alpha / max_rounds)
 
                 # compute theta_min_i, theta_max_i
                 if upper_half_circle:
@@ -472,42 +416,26 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         a_confidence_interval = a_intervals[-1]
 
         # the final estimate is the mean of the confidence interval
-        value = np.mean(a_confidence_interval)
+        estimation = np.mean(a_confidence_interval)
 
         # transform to estimate
-        estimation = self.post_processing(value)
-        confidence_interval = [self.post_processing(x) for x in a_confidence_interval]
-
-        # add result items to the results dictionary
-        self._ret = {
-            'value': value,
-            'value_confidence_interval': a_confidence_interval,
-            'confidence_interval': confidence_interval,
-            'estimation': estimation,
-            'alpha': self._alpha,
-            'actual_epsilon': (confidence_interval[1] - confidence_interval[0]) / 2,
-            'num_oracle_queries': num_oracle_queries,
-            'a_intervals': a_intervals,
-            'theta_intervals': theta_intervals,
-            'powers': powers,
-            'ratios': ratios,
-        }
-
-        ae_result = AmplitudeEstimationAlgorithmResult()
-        ae_result.value = self._ret['value']
-        ae_result.estimation = self._ret['estimation']
-        ae_result.num_oracle_queries = self._ret['num_oracle_queries']
-        ae_result.confidence_interval = self._ret['confidence_interval']
+        mapped_estimation = estimation_problem.post_processing(estimation)
+        confidence_interval = [estimation_problem.post_processing(x) for x in a_confidence_interval]
 
         result = IterativeAmplitudeEstimationResult()
-        result.combine(ae_result)
-        result.value_confidence_interval = self._ret['value_confidence_interval']
-        result.alpha = self._ret['alpha']
-        result.actual_epsilon = self._ret['actual_epsilon']
-        result.a_intervals = self._ret['a_intervals']
-        result.theta_intervals = self._ret['theta_intervals']
-        result.powers = self._ret['powers']
-        result.ratios = self._ret['ratios']
+        result.alpha = self._alpha
+        result.post_processing = estimation_problem.post_processing
+
+        result.a_estimation = estimation
+        result.actual_epsilon = (confidence_interval[1] - confidence_interval[0]) / 2
+        result.value_confidence_interval = a_confidence_interval
+        result.estimation = mapped_estimation
+        result.num_oracle_queries = num_oracle_queries
+        result.a_intervals = a_intervals
+        result.theta_intervals = theta_intervals
+        result.powers = powers
+        result.ratios = ratios
+
         return result
 
 
@@ -584,7 +512,61 @@ class IterativeAmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
         """ set ratios """
         self.data['ratios'] = value
 
+    @property
+    def confidence_interval(self):
+        """Return the mapped confidence interval."""
+        return tuple(self.post_processing(x) for x in self.value_confidence_interval)
+
     @staticmethod
     def from_dict(a_dict: Dict) -> 'IterativeAmplitudeEstimationResult':
         """ create new object from a dictionary """
         return IterativeAmplitudeEstimationResult(a_dict)
+
+
+def _chernoff_confint(value: float, shots: int, max_rounds: int, alpha: float
+                      ) -> Tuple[float, float]:
+    """Compute the Chernoff confidence interval for `shots` i.i.d. Bernoulli trials.
+
+    The confidence interval is
+
+        [value - eps, value + eps], where eps = sqrt(3 * log(2 * max_rounds/ alpha) / shots)
+
+    but at most [0, 1].
+
+    Args:
+        value: The current estimate.
+        shots: The number of shots.
+        max_rounds: The maximum number of rounds, used to compute epsilon_a.
+        alpha: The confidence level, used to compute epsilon_a.
+
+    Returns:
+        The Chernoff confidence interval.
+    """
+    eps = np.sqrt(3 * np.log(2 * max_rounds / alpha) / shots)
+    lower = np.maximum(0, value - eps)
+    upper = np.minimum(1, value + eps)
+    return lower, upper
+
+
+def _clopper_pearson_confint(counts: int, shots: int, alpha: float) -> Tuple[float, float]:
+    """Compute the Clopper-Pearson confidence interval for `shots` i.i.d. Bernoulli trials.
+
+    Args:
+        counts: The number of positive counts.
+        shots: The number of shots.
+        alpha: The confidence level for the confidence interval.
+
+    Returns:
+        The Clopper-Pearson confidence interval.
+    """
+    lower, upper = 0, 1
+
+    # if counts == 0, the beta quantile returns nan
+    if counts != 0:
+        lower = beta.ppf(alpha / 2, counts, shots - counts + 1)
+
+    # if counts == shots, the beta quantile returns nan
+    if counts != shots:
+        upper = beta.ppf(1 - alpha / 2, counts + 1, shots - counts)
+
+    return lower, upper
