@@ -71,6 +71,8 @@ Algorithms that estimate a value.
    :toctree: ../stubs/
    :nosignatures:
 
+   AmplitudeEstimator
+   AmplitudeEstimatorResult
    AmplitudeEstimationAlgorithmResult
    AmplitudeEstimation
    AmplitudeEstimationResult
@@ -78,6 +80,7 @@ Algorithms that estimate a value.
    IterativeAmplitudeEstimationResult
    MaximumLikelihoodAmplitudeEstimation
    MaximumLikelihoodAmplitudeEstimationResult
+   EstimationProblem
 
 Classifiers
 +++++++++++
@@ -195,13 +198,16 @@ from .quantum_algorithm import QuantumAlgorithm
 from .classical_algorithm import ClassicalAlgorithm
 from .vq_algorithm import VQAlgorithm, VQResult
 from .amplitude_amplifiers import Grover, GroverResult
-from .amplitude_estimators import (AmplitudeEstimationAlgorithmResult,
+from .amplitude_estimators import (AmplitudeEstimator,
+                                   AmplitudeEstimatorResult,
+                                   AmplitudeEstimationAlgorithmResult,
                                    AmplitudeEstimation,
                                    AmplitudeEstimationResult,
                                    IterativeAmplitudeEstimation,
                                    IterativeAmplitudeEstimationResult,
                                    MaximumLikelihoodAmplitudeEstimation,
-                                   MaximumLikelihoodAmplitudeEstimationResult)
+                                   MaximumLikelihoodAmplitudeEstimationResult,
+                                   EstimationProblem)
 from .classifiers import VQC, QSVM, SklearnSVM, SVM_Classical
 from .distribution_learners import QGAN
 from .eigen_solvers import NumPyEigensolver, ExactEigensolver, Eigensolver, EigensolverResult
@@ -248,6 +254,8 @@ __all__ = [
     'IQPEResult',
     'QPE',
     'QPEResult',
+    'AmplitudeEstimator',
+    'AmplitudeEstimatorResult',
     'AmplitudeEstimationAlgorithmResult',
     'AmplitudeEstimation',
     'AmplitudeEstimationResult',
@@ -255,6 +263,7 @@ __all__ = [
     'IterativeAmplitudeEstimationResult',
     'MaximumLikelihoodAmplitudeEstimation',
     'MaximumLikelihoodAmplitudeEstimationResult',
+    'EstimationProblem',
     'Simon',
     'DeutschJozsa',
     'BernsteinVazirani',
