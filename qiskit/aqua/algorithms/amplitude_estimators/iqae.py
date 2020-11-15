@@ -429,6 +429,8 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         result.a_estimation = estimation
         result.actual_epsilon = (confidence_interval[1] - confidence_interval[0]) / 2
         result.value_confidence_interval = a_confidence_interval
+        result.confidence_interval = tuple(estimation_problem.post_processing(x)
+                                           for x in a_confidence_interval)
         result.estimation = mapped_estimation
         result.num_oracle_queries = num_oracle_queries
         result.a_intervals = a_intervals
@@ -511,11 +513,6 @@ class IterativeAmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
     def ratios(self, value: List[float]) -> None:
         """ set ratios """
         self.data['ratios'] = value
-
-    @property
-    def confidence_interval(self):
-        """Return the mapped confidence interval."""
-        return tuple(self.post_processing(x) for x in self.value_confidence_interval)
 
     @staticmethod
     def from_dict(a_dict: Dict) -> 'IterativeAmplitudeEstimationResult':

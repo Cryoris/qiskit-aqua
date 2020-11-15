@@ -268,7 +268,7 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
 
     def confidence_interval(self, alpha: float, kind: str = 'likelihood_ratio'
                             ) -> Tuple[float, float]:
-        """DEPRECATED. This method is now part of the results object.
+        """DEPRECATED. Use ``compute_confidence_interval`` instead.
 
         Compute the (1 - alpha) confidence interval.
 
@@ -291,7 +291,7 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
         if self._last_result is None:
             raise AquaError('The algorithm must be executed before the confidence interval can '
                             'be computed.')
-        return self._last_result.confidence_interval(alpha, kind)
+        return self.compute_confidence_interval(self._last_result, alpha, kind)
 
     def estimate(self, estimation_problem: EstimationProblem) -> 'AmplitudeEstimationResult':
         """Run the amplitude estimation algorithm on provided estimation problem.
@@ -385,10 +385,47 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
         result.mapped_values = [estimation_problem.post_processing(item[0]) for item in a_sorted]
         result.probabilities = [estimation_problem.post_processing(item[1]) for item in a_sorted]
 
-        # TODO remove this, once ``confidence_interval`` has reached the end of deprecation`
+        result.confidence_interval = self.compute_confidence_interval(result)
+
+        # TODO remove this, once ``self.confidence_interval()`` has reached the end of deprecation`
         self._last_result = result
 
         return result
+
+    @staticmethod
+    def compute_confidence_interval(result: 'AmplitudeEstimationResult',
+                                    alpha: float = 0.05,
+                                    kind: str = 'likelihood_ratio'
+                                    ) -> Tuple[float, float]:
+        """Compute the (1 - alpha) confidence interval.
+
+        Args:
+            result: An amplitude estimation result for which to compute the confidence interval.
+            alpha: Confidence level: compute the (1 - alpha) confidence interval.
+            kind: The method to compute the confidence interval, can be 'fisher', 'observed_fisher'
+                or 'likelihood_ratio' (default)
+
+        Returns:
+            The (1 - alpha) confidence interval of the specified kind.
+
+        Raises:
+            AquaError: If 'mle' is not in self._ret.keys() (i.e. `run` was not called yet).
+            NotImplementedError: If the confidence interval method `kind` is not implemented.
+        """
+        # if statevector simulator the estimate is exact
+        if isinstance(result.circuit_result, (list, np.ndarray)):
+            return (result.mle, result.mle)
+
+        if kind in ['likelihood_ratio', 'lr']:
+            return _likelihood_ratio_confint(result, alpha)
+
+        if kind in ['fisher', 'fi']:
+            return _fisher_confint(result, alpha, observed=False)
+
+        if kind in ['observed_fisher', 'observed_information', 'oi']:
+            return _fisher_confint(result, alpha, observed=True)
+
+        raise NotImplementedError('CI `{}` is not implemented.'.format(kind))
 
     def _run(self) -> Dict:
         if self.state_preparation is None:
@@ -402,156 +439,6 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
 
 class AmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
     """ AmplitudeEstimation Result."""
-
-    def _compute_fisher_information(self, observed: bool = False) -> float:
-        """Computes the Fisher information for the output of the previous run.
-
-        Args:
-            observed: If True, the observed Fisher information is returned, otherwise
-                the expected Fisher information.
-
-        Returns:
-            The Fisher information.
-        """
-        fisher_information = None
-        mlv = self.ml_value  # MLE in [0,1]
-        m = self.num_evaluation_qubits
-        M = 2 ** m  # pylint: disable=invalid-name
-
-        if observed:
-            a_i = np.asarray(list(self.a_samples.keys()))
-            p_i = np.asarray(list(self.a_samples.values()))
-
-            # Calculate the observed Fisher information
-            fisher_information = sum(p * derivative_log_pdf_a(a, mlv, m) ** 2
-                                     for p, a in zip(p_i, a_i))
-        else:
-            def integrand(x):
-                return (derivative_log_pdf_a(x, mlv, m))**2 * pdf_a(x, mlv, m)
-
-            grid = np.sin(np.pi * np.arange(M / 2 + 1) / M) ** 2
-            fisher_information = sum(integrand(x) for x in grid)
-
-        return fisher_information
-
-    def _fisher_confint(self, alpha: float, observed: bool = False) -> List[float]:
-        """Compute the Fisher information confidence interval for the MLE of the previous run.
-
-        Args:
-            alpha: Specifies the (1 - alpha) confidence level (0 < alpha < 1).
-            observed: If True, the observed Fisher information is used to construct the
-                confidence interval, otherwise the expected Fisher information.
-
-        Returns:
-            The Fisher information confidence interval.
-        """
-        # approximate the standard deviation of the MLE and construct the confidence interval
-        std = np.sqrt(self.shots * self._compute_fisher_information(observed))
-        confint = self.ml_value + norm.ppf(1 - alpha / 2) / std * np.array([-1, 1])
-
-        # transform the confidence interval from [0, 1] to the target interval
-        return tuple(self.post_processing(bound) for bound in confint)
-
-    def _likelihood_ratio_confint(self, alpha: float) -> List[float]:
-        """Compute the likelihood ratio confidence interval for the MLE of the previous run.
-
-        Args:
-            alpha: Specifies the (1 - alpha) confidence level (0 < alpha < 1).
-
-        Returns:
-            The likelihood ratio confidence interval.
-        """
-        # Compute the two intervals in which we the look for values above
-        # the likelihood ratio: the two bubbles next to the QAE estimate
-        m = self.num_evaluation_qubits
-        M = 2 ** m  # pylint: disable=invalid-name
-        qae = self.estimation
-
-        y = int(np.round(M * np.arcsin(np.sqrt(qae)) / np.pi))
-        if y == 0:
-            right_of_qae = np.sin(np.pi * (y + 1) / M)**2
-            bubbles = [qae, right_of_qae]
-
-        elif y == int(M / 2):  # remember, M = 2^m is a power of 2
-            left_of_qae = np.sin(np.pi * (y - 1) / M)**2
-            bubbles = [left_of_qae, qae]
-
-        else:
-            left_of_qae = np.sin(np.pi * (y - 1) / M)**2
-            right_of_qae = np.sin(np.pi * (y + 1) / M)**2
-            bubbles = [left_of_qae, qae, right_of_qae]
-
-        # likelihood function
-        a_i = np.asarray(list(self.a_samples.keys()))
-        p_i = np.asarray(list(self.a_samples.values()))
-
-        def loglikelihood(a):
-            return np.sum(self.shots * p_i * np.log(pdf_a(a_i, a, m)))
-
-        # The threshold above which the likelihoods are in the
-        # confidence interval
-        loglik_mle = loglikelihood(self.ml_value)
-        thres = loglik_mle - chi2.ppf(1 - alpha, df=1) / 2
-
-        def cut(x):
-            return loglikelihood(x) - thres
-
-        # Store the boundaries of the confidence interval
-        # It's valid to start off with the zero-width confidence interval, since the maximum
-        # of the likelihood function is guaranteed to be over the threshold, and if alpha = 0
-        # that's the valid interval
-        lower = upper = self.ml_value
-
-        # Check the two intervals/bubbles: check if they surpass the
-        # threshold and if yes add the part that does to the CI
-        for a, b in zip(bubbles[:-1], bubbles[1:]):
-            # Compute local maximum and perform a bisect search between
-            # the local maximum and the bubble boundaries
-            locmax, val = bisect_max(loglikelihood, a, b, retval=True)
-            if val >= thres:
-                # Bisect pre-condition is that the function has different
-                # signs at the boundaries of the interval we search in
-                if cut(a) * cut(locmax) < 0:
-                    left = bisect(cut, a, locmax)
-                    lower = np.minimum(lower, left)
-                if cut(locmax) * cut(b) < 0:
-                    right = bisect(cut, locmax, b)
-                    upper = np.maximum(upper, right)
-
-        # Put together CI
-        confint = [lower, upper]
-        return tuple(self.post_processing(bound) for bound in confint)
-
-    def confidence_interval(self, alpha: float = 0.05, kind: str = 'likelihood_ratio'
-                            ) -> Tuple[float, float]:
-        """Compute the (1 - alpha) confidence interval.
-
-        Args:
-            alpha: Confidence level: compute the (1 - alpha) confidence interval.
-            kind: The method to compute the confidence interval, can be 'fisher', 'observed_fisher'
-                or 'likelihood_ratio' (default)
-
-        Returns:
-            The (1 - alpha) confidence interval of the specified kind.
-
-        Raises:
-            AquaError: If 'mle' is not in self._ret.keys() (i.e. `run` was not called yet).
-            NotImplementedError: If the confidence interval method `kind` is not implemented.
-        """
-        # if statevector simulator the estimate is exact
-        if isinstance(self.circuit_result, (list, np.ndarray)):
-            return (self.mle, self.mle)
-
-        if kind in ['likelihood_ratio', 'lr']:
-            return self._likelihood_ratio_confint(alpha)
-
-        if kind in ['fisher', 'fi']:
-            return self._fisher_confint(alpha, observed=False)
-
-        if kind in ['observed_fisher', 'observed_information', 'oi']:
-            return self._fisher_confint(alpha, observed=True)
-
-        raise NotImplementedError('CI `{}` is not implemented.'.format(kind))
 
     @property
     def num_evaluation_qubits(self) -> int:
@@ -594,16 +481,6 @@ class AmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
         self.data['probabilities'] = value
 
     @property
-    def shots(self) -> int:
-        """ return shots """
-        return self.get('shots')
-
-    @shots.setter
-    def shots(self, value: int) -> None:
-        """ set shots """
-        self.data['shots'] = value
-
-    @property
     def mle(self) -> float:
         """ return mle """
         return self.get('mle')
@@ -612,16 +489,6 @@ class AmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
     def mle(self, value: float) -> None:
         """ set mle """
         self.data['mle'] = value
-
-    @property
-    def circuit_result(self) -> Optional[Union[np.ndarray, Dict[str, int]]]:
-        """ return circuit result """
-        return self.get('circuit_result')
-
-    @circuit_result.setter
-    def circuit_result(self, value: Union[np.ndarray, Dict[str, int]]) -> None:
-        """ set circuit result """
-        self.data['circuit_result'] = value
 
     @property
     def a_samples(self) -> Dict[float, float]:
@@ -687,3 +554,130 @@ class AmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
             return super().__getitem__('a_samples')
 
         return super().__getitem__(key)
+
+
+def _compute_fisher_information(result: AmplitudeEstimationResult, observed: bool = False) -> float:
+    """Computes the Fisher information for the output of the previous run.
+
+    Args:
+        result: An amplitude estimation result for which to compute the confidence interval.
+        observed: If True, the observed Fisher information is returned, otherwise
+            the expected Fisher information.
+
+    Returns:
+        The Fisher information.
+    """
+    fisher_information = None
+    mlv = result.ml_value  # MLE in [0,1]
+    m = result.num_evaluation_qubits
+    M = 2 ** m  # pylint: disable=invalid-name
+
+    if observed:
+        a_i = np.asarray(list(result.a_samples.keys()))
+        p_i = np.asarray(list(result.a_samples.values()))
+
+        # Calculate the observed Fisher information
+        fisher_information = sum(p * derivative_log_pdf_a(a, mlv, m) ** 2
+                                 for p, a in zip(p_i, a_i))
+    else:
+        def integrand(x):
+            return (derivative_log_pdf_a(x, mlv, m))**2 * pdf_a(x, mlv, m)
+
+        grid = np.sin(np.pi * np.arange(M / 2 + 1) / M) ** 2
+        fisher_information = sum(integrand(x) for x in grid)
+
+    return fisher_information
+
+
+def _fisher_confint(result: AmplitudeEstimationResult, alpha: float, observed: bool = False
+                    ) -> List[float]:
+    """Compute the Fisher information confidence interval for the MLE of the previous run.
+
+    Args:
+        result: An amplitude estimation result for which to compute the confidence interval.
+        alpha: Specifies the (1 - alpha) confidence level (0 < alpha < 1).
+        observed: If True, the observed Fisher information is used to construct the
+            confidence interval, otherwise the expected Fisher information.
+
+    Returns:
+        The Fisher information confidence interval.
+    """
+    # approximate the standard deviation of the MLE and construct the confidence interval
+    std = np.sqrt(result.shots * _compute_fisher_information(result, observed))
+    confint = result.ml_value + norm.ppf(1 - alpha / 2) / std * np.array([-1, 1])
+
+    # transform the confidence interval from [0, 1] to the target interval
+    return tuple(result.post_processing(bound) for bound in confint)
+
+
+def _likelihood_ratio_confint(result: AmplitudeEstimationResult,
+                              alpha: float) -> List[float]:
+    """Compute the likelihood ratio confidence interval for the MLE of the previous run.
+
+    Args:
+        result: An amplitude estimation result for which to compute the confidence interval.
+        alpha: Specifies the (1 - alpha) confidence level (0 < alpha < 1).
+
+    Returns:
+        The likelihood ratio confidence interval.
+    """
+    # Compute the two intervals in which we the look for values above
+    # the likelihood ratio: the two bubbles next to the QAE estimate
+    m = result.num_evaluation_qubits
+    M = 2 ** m  # pylint: disable=invalid-name
+    qae = result.estimation
+
+    y = int(np.round(M * np.arcsin(np.sqrt(qae)) / np.pi))
+    if y == 0:
+        right_of_qae = np.sin(np.pi * (y + 1) / M)**2
+        bubbles = [qae, right_of_qae]
+
+    elif y == int(M / 2):  # remember, M = 2^m is a power of 2
+        left_of_qae = np.sin(np.pi * (y - 1) / M)**2
+        bubbles = [left_of_qae, qae]
+
+    else:
+        left_of_qae = np.sin(np.pi * (y - 1) / M)**2
+        right_of_qae = np.sin(np.pi * (y + 1) / M)**2
+        bubbles = [left_of_qae, qae, right_of_qae]
+
+    # likelihood function
+    a_i = np.asarray(list(result.a_samples.keys()))
+    p_i = np.asarray(list(result.a_samples.values()))
+
+    def loglikelihood(a):
+        return np.sum(result.shots * p_i * np.log(pdf_a(a_i, a, m)))
+
+    # The threshold above which the likelihoods are in the
+    # confidence interval
+    loglik_mle = loglikelihood(result.ml_value)
+    thres = loglik_mle - chi2.ppf(1 - alpha, df=1) / 2
+
+    def cut(x):
+        return loglikelihood(x) - thres
+
+    # Store the boundaries of the confidence interval
+    # It's valid to start off with the zero-width confidence interval, since the maximum
+    # of the likelihood function is guaranteed to be over the threshold, and if alpha = 0
+    # that's the valid interval
+    lower = upper = result.ml_value
+
+    # Check the two intervals/bubbles: check if they surpass the
+    # threshold and if yes add the part that does to the CI
+    for a, b in zip(bubbles[:-1], bubbles[1:]):
+        # Compute local maximum and perform a bisect search between
+        # the local maximum and the bubble boundaries
+        locmax, val = bisect_max(loglikelihood, a, b, retval=True)
+        if val >= thres:
+            # Bisect pre-condition is that the function has different
+            # signs at the boundaries of the interval we search in
+            if cut(a) * cut(locmax) < 0:
+                left = bisect(cut, a, locmax)
+                lower = np.minimum(lower, left)
+            if cut(locmax) * cut(b) < 0:
+                right = bisect(cut, locmax, b)
+                upper = np.maximum(upper, right)
+
+    # Put together CI
+    confint = [lower, upper]
+    return tuple(result.post_processing(bound) for bound in confint)

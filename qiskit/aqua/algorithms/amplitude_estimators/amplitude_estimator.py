@@ -14,7 +14,8 @@
 
 import warnings
 from abc import abstractmethod
-from typing import Union, Optional, Dict, Callable
+from typing import Union, Optional, Dict, Callable, Tuple
+import numpy as np
 from qiskit.providers import BaseBackend, Backend
 from qiskit.aqua import QuantumInstance
 from qiskit.aqua.algorithms import AlgorithmResult, QuantumAlgorithm
@@ -42,6 +43,26 @@ class AmplitudeEstimator(QuantumAlgorithm):
 
 class AmplitudeEstimatorResult(AlgorithmResult):
     """The results object for amplitude estimation algorithms."""
+
+    @property
+    def circuit_result(self) -> Optional[Union[np.ndarray, Dict[str, int]]]:
+        """ return circuit result """
+        return self.get('circuit_result')
+
+    @circuit_result.setter
+    def circuit_result(self, value: Union[np.ndarray, Dict[str, int]]) -> None:
+        """ set circuit result """
+        self.data['circuit_result'] = value
+
+    @property
+    def shots(self) -> int:
+        """ return shots """
+        return self.get('shots')
+
+    @shots.setter
+    def shots(self, value: int) -> None:
+        """ set shots """
+        self.data['shots'] = value
 
     @property
     def a_estimation(self) -> float:
@@ -84,6 +105,16 @@ class AmplitudeEstimatorResult(AlgorithmResult):
         """ sets post_processing """
         self._post_processing = post_processing
         # self.data['post_processing'] = post_processing
+
+    @property
+    def confidence_interval(self) -> Tuple[float, float]:
+        """ returns the confidence interval (95% by default) """
+        return self.get('confidence_interval')
+
+    @confidence_interval.setter
+    def confidence_interval(self, confidence_interval: Tuple[float, float]) -> None:
+        """ sets confidence interval """
+        self.data['confidence_interval'] = confidence_interval
 
     @staticmethod
     def from_dict(a_dict: Dict) -> 'AmplitudeEstimationAlgorithmResult':
