@@ -20,7 +20,7 @@ from qiskit import QuantumRegister, QuantumCircuit, BasicAer
 from qiskit.circuit.library import QFT, GroverOperator
 from qiskit.aqua import QuantumInstance
 from qiskit.aqua.algorithms import (AmplitudeEstimation, MaximumLikelihoodAmplitudeEstimation,
-                                    IterativeAmplitudeEstimation)
+                                    IterativeAmplitudeEstimation, EstimationProblem)
 
 from qiskit.quantum_info import Operator
 
@@ -107,10 +107,10 @@ class TestBernoulli(QiskitAquaTestCase):
     def test_statevector(self, prob, qae, expect):
         """ statevector test """
         # construct factories for A and Q
-        qae.state_preparation = BernoulliStateIn(prob)
-        qae.grover_operator = BernoulliGrover(prob)
+        qae.quantum_instance = self._statevector
+        problem = EstimationProblem(BernoulliStateIn(prob), BernoulliGrover(prob), [0])
 
-        result = qae.run(self._statevector)
+        result = qae.estimate(problem)
         self.assertGreater(self._statevector.time_taken, 0.)
         self._statevector.reset_execution_results()
         for key, value in expect.items():
