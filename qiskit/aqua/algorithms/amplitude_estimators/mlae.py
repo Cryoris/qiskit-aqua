@@ -125,7 +125,7 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         # TODO remove this, once ``self.confidence_interval()`` has reached the end of deprecation`
         self._last_result = None  # type: MaximumLikelihoodAmplitudeEstimationResult
 
-    def construct_circuits(self, estimation_problem: Optional[EstimationProblem],
+    def construct_circuits(self, estimation_problem: Optional[EstimationProblem] = None,
                            measurement: bool = False) -> List[QuantumCircuit]:
         """Construct the Amplitude Estimation w/o QPE quantum circuits.
 
@@ -185,7 +185,7 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         """For each statevector compute the probability that |1> is measured in the objective qubit.
 
         Args:
-            num_qubits: The number of state qubits.
+            num_state_qubits: The number of state qubits.
             statevectors: A list of statevectors.
 
         Raises:
@@ -349,10 +349,16 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         return list(self.compute_confidence_interval(self._last_result, alpha, kind))
 
     @staticmethod
-    def _compute_mle_safe(result: 'MaximumLikelihoodAmplitudeEstimationResult') -> float:
+    def compute_mle(result: 'MaximumLikelihoodAmplitudeEstimationResult') -> float:
         """Compute the MLE via a grid-search.
 
         This is a stable approach if sufficient gridpoints are used.
+
+        Args:
+            result: An amplitude estimation result object.
+
+        Returns:
+            The MLE for the provided result object.
         """
         one_hits = result.one_hits
         all_hits = result.all_hits
@@ -371,16 +377,6 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
 
         est_theta = brute(loglikelihood, [search_range], Ns=result.likelihood_nevals)[0]
         return est_theta
-
-    @staticmethod
-    def _run_mle(result: 'MaximumLikelihoodAmplitudeEstimationResult') -> float:
-        """Compute the maximum likelihood estimator (MLE) for the angle theta.
-
-        Returns:
-            The MLE for the angle theta, related to the amplitude a via a = sin^2(theta)
-        """
-        # TODO implement a **reliable**, fast method to find the maximum of the likelihood function
-        return MaximumLikelihoodAmplitudeEstimation._compute_mle_safe(result)
 
     def estimate(self, estimation_problem: EstimationProblem
                  ) -> 'MaximumLikelihoodAmplitudeEstimationResult':
@@ -423,7 +419,7 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         result.all_hits = all_hits
 
         # run maximum likelihood estimation and construct results
-        result.theta = self._run_mle(result)
+        result.theta = self.compute_mle(result)
         result.a_estimation = np.sin(result.theta)**2
         result.estimation = result.post_processing(result.a_estimation)
         result.fisher_information = self._compute_fisher_information(result)

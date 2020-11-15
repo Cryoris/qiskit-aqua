@@ -214,25 +214,26 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
 
         return a_samples, y_samples
 
-    def _run_mle(self, qae, a_samples, shots) -> float:
+    @staticmethod
+    def compute_mle(result: 'AmplitudeEstimationResult') -> float:
         """Compute the Maximum Likelihood Estimator (MLE).
 
-        Returns:
-            The MLE for the previous AE run.
+        Args:
+            result: An amplitude estimation result object.
 
-        Note:
-            Before calling this method, call the method `run` of the AmplitudeEstimation instance.
+        Returns:
+            The MLE for the provided result object.
         """
-        M = self._M  # pylint: disable=invalid-name
+        m = result.num_evaluation_qubits
+        M = 2 ** m  # pylint: disable=invalid-name
+        qae = result.a_estimation
 
         # likelihood function
-        a_i = np.asarray(list(a_samples.keys()))
-        p_i = np.asarray(list(a_samples.values()))
-
-        m = self._m
+        a_i = np.asarray(list(result.a_samples.keys()))
+        p_i = np.asarray(list(result.a_samples.values()))
 
         def loglikelihood(a):
-            return np.sum(shots * p_i * np.log(pdf_a(a_i, a, m)))
+            return np.sum(result.shots * p_i * np.log(pdf_a(a_i, a, m)))
 
         # y is pretty much an integer, but to map 1.9999 to 2 we must first
         # use round and then int conversion
@@ -377,7 +378,7 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
         result.num_oracle_queries = result.shots * (self._M - 1)
 
         # run the MLE post processing
-        a_mle = self._run_mle(result.a_estimation, result.a_samples, result.shots)
+        a_mle = self.compute_mle(result)
         result.ml_value = a_mle
         result.mle = estimation_problem.post_processing(a_mle)
 
