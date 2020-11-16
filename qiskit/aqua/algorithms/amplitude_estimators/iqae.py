@@ -13,26 +13,23 @@
 
 """The Iterative Quantum Amplitude Estimation Algorithm."""
 
-import warnings
-from typing import Optional, Union, List, Tuple, Callable, Dict, Any, cast
+from typing import Optional, Union, List, Tuple, Dict, cast
 import logging
 import numpy as np
 from scipy.stats import beta
 
 from qiskit import ClassicalRegister, QuantumCircuit
-from qiskit.providers import BaseBackend
-from qiskit.providers import Backend
+from qiskit.providers import BaseBackend, Backend
 from qiskit.aqua import QuantumInstance, AquaError
-from qiskit.aqua.utils.circuit_factory import CircuitFactory
 from qiskit.aqua.utils.validation import validate_range, validate_in_set
 
-from .ae_algorithm import AmplitudeEstimationAlgorithm, AmplitudeEstimationAlgorithmResult
+from .amplitude_estimator import AmplitudeEstimator, AmplitudeEstimatorResult
 from .estimation_problem import EstimationProblem
 
 logger = logging.getLogger(__name__)
 
 
-class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
+class IterativeAmplitudeEstimation(AmplitudeEstimator):
     r"""The Iterative Amplitude Estimation algorithm.
 
     This class implements the Iterative Quantum Amplitude Estimation (IQAE) algorithm, proposed
@@ -53,99 +50,54 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
              `arXiv:quant-ph/0005055 <http://arxiv.org/abs/quant-ph/0005055>`_.
     """
 
-    def __init__(self, epsilon: float,
+    def __init__(self,
+                 epsilon_target: float,
                  alpha: float,
                  confint_method: str = 'beta',
                  min_ratio: float = 2,
-                 state_preparation: Optional[Union[QuantumCircuit, CircuitFactory]] = None,
-                 grover_operator: Optional[Union[QuantumCircuit, CircuitFactory]] = None,
-                 objective_qubits: Optional[List[int]] = None,
-                 post_processing: Optional[Callable[[float], float]] = None,
-                 a_factory: Optional[CircuitFactory] = None,
-                 q_factory: Optional[CircuitFactory] = None,
-                 i_objective: Optional[int] = None,
-                 initial_state: Optional[QuantumCircuit] = None,
-                 quantum_instance: Optional[
-                     Union[QuantumInstance, BaseBackend, Backend]] = None) -> None:
+                 quantum_instance: Optional[Union[QuantumInstance, BaseBackend, Backend]] = None
+                 ) -> None:
         r"""
         The output of the algorithm is an estimate for the amplitude `a`, that with at least
         probability 1 - alpha has an error of epsilon. The number of A operator calls scales
         linearly in 1/epsilon (up to a logarithmic factor).
 
         Args:
-            epsilon: Target precision for estimation target `a`, has values between 0 and 0.5
+            epsilon_target: Target precision for estimation target `a`, has values between 0 and 0.5
             alpha: Confidence level, the target probability is 1 - alpha, has values between 0 and 1
             confint_method: Statistical method used to estimate the confidence intervals in
                 each iteration, can be 'chernoff' for the Chernoff intervals or 'beta' for the
                 Clopper-Pearson intervals (default)
             min_ratio: Minimal q-ratio (:math:`K_{i+1} / K_i`) for FindNextK
-            state_preparation: A circuit preparing the input state, referred to as
-                :math:`\mathcal{A}`.
-            grover_operator: The Grover operator :math:`\mathcal{Q}` used as unitary in the
-                phase estimation circuit.
-            objective_qubits: A list of qubit indices. A measurement outcome is classified as
-                'good' state if all objective qubits are in state :math:`|1\rangle`, otherwise it
-                is classified as 'bad'.
-            post_processing: A mapping applied to the estimate of :math:`0 \leq a \leq 1`,
-                usually used to map the estimate to a target interval.
-            a_factory: The A operator, specifying the QAE problem
-            q_factory: The Q operator (Grover operator), constructed from the
-                A operator
-            i_objective: Index of the objective qubit, that marks the 'good/bad' states
-            initial_state: A state to prepend to the constructed circuits.
             quantum_instance: Quantum Instance or Backend
 
         Raises:
             AquaError: if the method to compute the confidence intervals is not supported
         """
         # validate ranges of input arguments
-        validate_range('epsilon', epsilon, 0, 0.5)
+        validate_range('epsilon', epsilon_target, 0, 0.5)
         validate_range('alpha', alpha, 0, 1)
         validate_in_set('confint_method', confint_method, {'chernoff', 'beta'})
 
-        # support legacy input if passed as positional arguments
-        if isinstance(state_preparation, CircuitFactory):
-            a_factory = state_preparation
-            state_preparation = None
-
-        if isinstance(grover_operator, CircuitFactory):
-            q_factory = grover_operator
-            grover_operator = None
-
-        if isinstance(objective_qubits, int):
-            i_objective = objective_qubits
-            objective_qubits = None
-
-        super().__init__(state_preparation=state_preparation,
-                         grover_operator=grover_operator,
-                         objective_qubits=objective_qubits,
-                         post_processing=post_processing,
-                         a_factory=a_factory,
-                         q_factory=q_factory,
-                         i_objective=i_objective,
-                         quantum_instance=quantum_instance)
+        super().__init__(quantum_instance)
 
         # store parameters
-        self._epsilon = epsilon
+        self._epsilon = epsilon_target
         self._alpha = alpha
         self._min_ratio = min_ratio
         self._confint_method = confint_method
-        self._initial_state = initial_state
-
-        # results dictionary
-        self._ret = {}  # type: Dict[str, Any]
 
     @property
-    def precision(self) -> float:
-        """Returns the target precision `epsilon` of the algorithm.
+    def epsilon_target(self) -> float:
+        """Returns the target precision ``epsilon_target`` of the algorithm.
 
         Returns:
             The target precision (which is half the width of the confidence interval).
         """
         return self._epsilon
 
-    @precision.setter
-    def precision(self, epsilon: float) -> None:
+    @epsilon_target.setter
+    def epsilon_target(self, epsilon: float) -> None:
         """Set the target precision of the algorithm.
 
         Args:
@@ -204,9 +156,9 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         # if we do not find a feasible k, return the old one
         return int(k), upper_half_circle
 
-    def construct_circuit(self, estimation_problem: Optional[EstimationProblem] = None,
+    def construct_circuit(self, estimation_problem: EstimationProblem,
                           k: int = 0, measurement: bool = False) -> QuantumCircuit:
-        r"""Construct the circuit Q^k A \|0>.
+        r"""Construct the circuit :math:`\mathcal{Q}^k \mathcal{A} |0\rangle`.
 
         The A operator is the unitary specifying the QAE problem and Q the associated Grover
         operator.
@@ -218,27 +170,11 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
                 circuits.
 
         Returns:
-            The circuit Q^k A \|0>.
+            The circuit implementing :math:`\mathcal{Q}^k \mathcal{A} |0\rangle`.
         """
-        if isinstance(estimation_problem, int):
-            warnings.warn('The first argument of construct_circuit is now an estimation problem.')
-            if isinstance(k, bool):
-                measurement = k
-            k = estimation_problem
-            estimation_problem = None
-        elif estimation_problem is None:
-            warnings.warn('In future, construct_circuit must be passed an optimization problem.')
-
-        if estimation_problem is None:
-            estimation_problem = EstimationProblem(self.state_preparation, self.grover_operator,
-                                                   self.objective_qubits)
-
         num_qubits = max(estimation_problem.state_preparation.num_qubits,
                          estimation_problem.grover_operator.num_qubits)
         circuit = QuantumCircuit(num_qubits, name='circuit')
-
-        if self._initial_state is not None:
-            circuit.compose(self._initial_state, inplace=True)
 
         # add classical register if needed
         if measurement:
@@ -304,16 +240,6 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
                     prob = prob + np.abs(amplitude)**2
 
             return prob
-
-    def _run(self) -> 'IterativeAmplitudeEstimationResult':
-        # check if A factory or state_preparation has been set
-        if self.state_preparation is None:
-            raise AquaError('Either the state_preparation variable or the a_factory '
-                            '(deprecated) must be set to run the algorithm.')
-
-        estimation_problem = EstimationProblem(self.state_preparation, self.grover_operator,
-                                               self.objective_qubits, self.post_processing)
-        return self.estimate(estimation_problem)
 
     def estimate(self, estimation_problem: EstimationProblem
                  ) -> 'IterativeAmplitudeEstimationResult':
@@ -429,27 +355,26 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
                 a_intervals.append([a_l, a_u])
 
         # get the latest confidence interval for the estimate of a
-        a_confidence_interval = a_intervals[-1]
+        confidence_interval = a_intervals[-1]
 
         # the final estimate is the mean of the confidence interval
-        estimation = np.mean(a_confidence_interval)
-
-        # transform to estimate
-        mapped_estimation = estimation_problem.post_processing(estimation)
-        confidence_interval = [estimation_problem.post_processing(x) for x in a_confidence_interval]
+        estimation = np.mean(confidence_interval)
 
         result = IterativeAmplitudeEstimationResult()
         result.alpha = self._alpha
         result.post_processing = estimation_problem.post_processing
-
-        result.a_estimation = estimation
-        result.actual_epsilon = (confidence_interval[1] - confidence_interval[0]) / 2
-        result.value_confidence_interval = a_confidence_interval
-        result.confidence_interval = tuple(estimation_problem.post_processing(x)
-                                           for x in a_confidence_interval)
-        result.estimation = mapped_estimation
         result.num_oracle_queries = num_oracle_queries
-        result.a_intervals = a_intervals
+
+        result.estimation = estimation
+        result.epsilon_estimated = (confidence_interval[1] - confidence_interval[0]) / 2
+        result.confidence_interval = confidence_interval
+
+        result.estimation_processed = estimation_problem.post_processing(estimation)
+        confidence_interval = tuple(estimation_problem.post_processing(x)
+                                    for x in a_confidence_interval)
+        result.confidence_interval_processed = confidence_interval
+        result.epsilon_estimated_processed = (confidence_interval[1] - confidence_interval[0]) / 2
+        result.estimate_intervals = a_intervals
         result.theta_intervals = theta_intervals
         result.powers = powers
         result.ratios = ratios
@@ -457,18 +382,8 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         return result
 
 
-class IterativeAmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
+class IterativeAmplitudeEstimationResult(AmplitudeEstimatorResult):
     """ IterativeAmplitudeEstimation Result."""
-
-    @property
-    def value_confidence_interval(self) -> List[float]:
-        """ return value_confidence_interval  """
-        return self.get('value_confidence_interval')
-
-    @value_confidence_interval.setter
-    def value_confidence_interval(self, value: List[float]) -> None:
-        """ set value_confidence_interval """
-        self.data['value_confidence_interval'] = value
 
     @property
     def alpha(self) -> float:
@@ -481,24 +396,44 @@ class IterativeAmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
         self.data['alpha'] = value
 
     @property
-    def actual_epsilon(self) -> float:
-        """ return mle """
-        return self.get('actual_epsilon')
+    def epsilon_target(self) -> float:
+        """ return target epsilon """
+        return self.get('epsilon_target')
 
-    @actual_epsilon.setter
-    def actual_epsilon(self, value: float) -> None:
+    @epsilon_target.setter
+    def epsilon_target(self, value: float) -> None:
         """ set mle """
-        self.data['actual_epsilon'] = value
+        self.data['epsilon_target'] = value
 
     @property
-    def a_intervals(self) -> List[List[float]]:
-        """ return a_intervals """
-        return self.get('a_intervals')
+    def epsilon_estimated(self) -> float:
+        """ return mle """
+        return self.get('epsilon_estimated')
 
-    @a_intervals.setter
-    def a_intervals(self, value: List[List[float]]) -> None:
-        """ set a_intervals """
-        self.data['a_intervals'] = value
+    @epsilon_estimated.setter
+    def epsilon_estimated(self, value: float) -> None:
+        """ set mle """
+        self.data['epsilon_estimated'] = value
+
+    @property
+    def epsilon_estimated_processed(self) -> float:
+        """ return estimated, processed epsilon """
+        return self.get('epsilon_estimated_processed')
+
+    @epsilon_estimated_processed.setter
+    def epsilon_estimated_processed(self, value: float) -> None:
+        """ set estimated, processed epsilon """
+        self.data['epsilon_estimated_processed'] = value
+
+    @property
+    def estimate_intervals(self) -> List[List[float]]:
+        """ return estimate_intervals """
+        return self.get('estimate_intervals')
+
+    @estimate_intervals.setter
+    def estimate_intervals(self, value: List[List[float]]) -> None:
+        """ set estimate_intervals """
+        self.data['estimate_intervals'] = value
 
     @property
     def theta_intervals(self) -> List[List[float]]:
@@ -529,6 +464,16 @@ class IterativeAmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
     def ratios(self, value: List[float]) -> None:
         """ set ratios """
         self.data['ratios'] = value
+
+    @property
+    def confidence_interval_processed(self) -> List[float]:
+        """ return confidence_interval_processed  """
+        return self.get('confidence_interval_processed')
+
+    @confidence_interval_processed.setter
+    def confidence_interval_processed(self, value: List[float]) -> None:
+        """ set confidence_interval_processed """
+        self.data['confidence_interval_processed'] = value
 
     @staticmethod
     def from_dict(a_dict: Dict) -> 'IterativeAmplitudeEstimationResult':
