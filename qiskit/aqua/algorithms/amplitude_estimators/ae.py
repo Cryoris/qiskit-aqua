@@ -175,34 +175,44 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
 
         return circuit
 
-    def _evaluate_statevector_results(self,
-                                      num_qubits: int,
-                                      probabilities: Union[List[float], np.ndarray]
-                                      ) -> Tuple[OrderedDict, OrderedDict]:
+    def accumulate_measurements(self, circuit_result: Union[Dict[str, int], np.ndarray],
+                                threshold: float = 1e-6,
+                                ) -> Tuple[Dict[int, float], Dict[float, float]]:
         """Evaluate the results from statevector simulation.
 
         Given the probabilities from statevector simulation of the QAE circuit, compute the
         probabilities that the measurements y/gridpoints a are the best estimate.
 
         Args:
-            num_qubits: The total number of qubits in the QAE circuit.
-            probabilities: The probabilities obtained from the statevector simulation,
-                i.e. real(statevector * statevector.conj())[0]
-
-        Raises:
-            AquaError: If `construct_circuit` has not been called before. The `construct_circuit`
-                method sets an internal variable required in this method.
+            circuit_result: The circuit result from the QAE circuit. Can be either a counts dict
+                or a statevector.
+            threshold: Measurements with probabilities below the threshold are discarded.
 
         Returns:
             Dictionaries containing the a gridpoints with respective probabilities and
                 y measurements with respective probabilities, in this order.
         """
+        # compute grid sample and measurement dicts
+        if isinstance(circuit_result, dict):
+            samples, measurements = self._evaluate_count_results(circuit_result)
+        else:
+            samples, measurements = self._evaluate_statevector_results(circuit_result)
+
+        # cutoff probabilities below the threshold
+        samples = {a: p for a, p in samples.items() if p > threshold}
+        measurements = {y: p for y, p in measurements.items() if p > threshold}
+
+        return samples, measurements
+
+    def _evaluate_statevector_results(self, statevector):
         # map measured results to estimates
         y_samples = OrderedDict()  # type: OrderedDict
-        for i, probability in enumerate(probabilities):
-            b = '{0:b}'.format(i).rjust(num_qubits, '0')[::-1]
-            y = int(b[:self._m], 2)
-            y_samples[y] = y_samples.get(y, 0) + probability
+        num_qubits = int(np.log2(len(statevector)))
+        for i, amplitude in enumerate(statevector):
+            # b = '{0:b}'.format(i).rjust(num_qubits, '0')[::-1]
+            b = bin(i)[2:].zfill(num_qubits)[::-1]
+            y = int(b[:self._m], 2)  # chop off all except the evaluation qubits
+            y_samples[y] = y_samples.get(y, 0) + np.abs(amplitude) ** 2
 
         a_samples = OrderedDict()  # type: OrderedDict
         for y, probability in y_samples.items():
@@ -211,6 +221,21 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
             # due to the finite accuracy of the sine, we round the result to 7 decimals
             a = np.round(np.power(np.sin(y * np.pi / 2 ** self._m), 2), decimals=7)
             a_samples[a] = a_samples.get(a, 0) + probability
+
+        return a_samples, y_samples
+
+    def _evaluate_count_results(self, counts):
+        # construct probabilities
+        y_samples = OrderedDict()
+        a_samples = OrderedDict()
+        shots = self._quantum_instance._run_config.shots
+
+        for state, count in counts.items():
+            y = int(state.replace(' ', '')[:self._m][::-1], 2)
+            probability = count / shots
+            y_samples[y] = probability
+            a = np.round(np.power(np.sin(y * np.pi / 2 ** self._m), 2), decimals=7)
+            a_samples[a] = a_samples.get(a, 0.0) + probability
 
         return a_samples, y_samples
 
@@ -327,11 +352,11 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
             result.circuit_result = statevector
 
             # get state probabilities
-            state_probabilities = np.real(statevector.conj() * statevector)
+            # state_probabilities = np.real(statevector.conj() * statevector)
 
             # evaluate results
-            a_samples, y_samples = self._evaluate_statevector_results(circuit.num_qubits,
-                                                                      state_probabilities)
+            # a_samples, y_samples = self._evaluate_statevector_results(circuit.num_qubits,
+            #                                                           state_probabilities)
 
             # store number of shots: convention is 1 shot for statevector,
             # needed so that MLE works!
@@ -342,33 +367,19 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
             counts = self._quantum_instance.execute(circuit).get_counts()
             result.circuit_result = counts
 
-            # construct probabilities
-            y_samples = OrderedDict()
-            a_samples = OrderedDict()
-            shots = self._quantum_instance._run_config.shots
-
-            for state, counts in counts.items():
-                y = int(state.replace(' ', '')[:self._m][::-1], 2)
-                probability = counts / shots
-                y_samples[y] = probability
-                a = np.round(np.power(np.sin(y * np.pi / 2 ** self._m), 2), decimals=7)
-                a_samples[a] = a_samples.get(a, 0.0) + probability
-
             # store shots
-            result.shots = shots
+            result.shots = sum(counts.values())
 
-        # construct a_items and y_items
-        a_samples = {a: p for a, p in a_samples.items() if p > 1e-6}
-        y_samples = {y: p for y, p in y_samples.items() if p > 1e-6}
+        samples, measurements = self.accumulate_measurements(result.circuit_result)
 
-        result.a_samples = a_samples
+        result.a_samples = samples
         result.mapped_a_samples = {estimation_problem.post_processing(a): p
-                                   for a, p in a_samples.items()}
-        result.measurements = y_samples
+                                   for a, p in samples.items()}
+        result.measurements = measurements
 
         # determine the most likely estimate
         result.max_probability = 0
-        for amplitude, (mapped, prob) in zip(a_samples.keys(), result.mapped_a_samples.items()):
+        for amplitude, (mapped, prob) in zip(samples.keys(), result.mapped_a_samples.items()):
             if prob > result.max_probability:
                 result.max_probability = prob
                 result.a_estimation = amplitude
@@ -382,7 +393,7 @@ class AmplitudeEstimation(AmplitudeEstimationAlgorithm):
         result.ml_value = a_mle
         result.mle = estimation_problem.post_processing(a_mle)
 
-        a_sorted = sorted(list(a_samples.items()))
+        a_sorted = sorted(list(samples.items()))
         result.mapped_values = [estimation_problem.post_processing(item[0]) for item in a_sorted]
         result.probabilities = [estimation_problem.post_processing(item[1]) for item in a_sorted]
 

@@ -273,7 +273,7 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
                 the ``is_good_state`` function.
             counts_or_statevector: Either a counts-dictionary (with one measured qubit only!) or
                 the statevector returned from the statevector_simulator.
-            num_qubits: The number of state qubits.
+            num_state_qubits: The number of state qubits.
 
         Returns:
             If a dict is given, return (#one-counts, #one-counts/#all-counts),
