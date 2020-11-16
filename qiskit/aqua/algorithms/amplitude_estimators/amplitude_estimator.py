@@ -12,24 +12,48 @@
 
 """The Amplitude Estimation interface."""
 
-import warnings
 from abc import abstractmethod
 from typing import Union, Optional, Dict, Callable, Tuple
 import numpy as np
 from qiskit.providers import BaseBackend, Backend
 from qiskit.aqua import QuantumInstance
-from qiskit.aqua.algorithms import AlgorithmResult, QuantumAlgorithm
+from qiskit.aqua.algorithms import AlgorithmResult
 
 from .estimation_problem import EstimationProblem
 
 
-class AmplitudeEstimator(QuantumAlgorithm):
+class AmplitudeEstimator:
     """The Amplitude Estimation interface."""
 
     def __init__(self,
                  quantum_instance: Optional[Union[Backend, BaseBackend, QuantumInstance]] = None
                  ) -> None:
-        super().__init__(quantum_instance)
+        """
+        Args:
+            quantum_instance: The quantum instance used to run this algorithm.
+        """
+        self.quantum_instance = quantum_instance
+
+    @property
+    def quantum_instance(self) -> Optional[QuantumInstance]:
+        """Get the quantum instance.
+
+        Returns:
+            The quantum instance used to run this algorithm.
+        """
+        return self._quantum_instance
+
+    @quantum_instance.setter
+    def quantum_instance(self, quantum_instance: Union[QuantumInstance,
+                                                       BaseBackend, Backend]) -> None:
+        """Set quantum instance.
+
+        Args:
+            quantum_instance: The quantum instance used to run this algorithm.
+        """
+        if isinstance(quantum_instance, (BaseBackend, Backend)):
+            quantum_instance = QuantumInstance(quantum_instance)
+        self._quantum_instance = quantum_instance
 
     @abstractmethod
     def estimate(self, estimation_problem: EstimationProblem) -> 'AmplitudeEstimatorResult':
@@ -65,24 +89,24 @@ class AmplitudeEstimatorResult(AlgorithmResult):
         self.data['shots'] = value
 
     @property
-    def a_estimation(self) -> float:
-        """ return a_estimation """
-        return self.get('a_estimation')
-
-    @a_estimation.setter
-    def a_estimation(self, value: float) -> None:
-        """ set a_estimation """
-        self.data['a_estimation'] = value
-
-    @property
     def estimation(self) -> float:
-        """ return estimation """
+        r"""Return the estimation for the amplitude in :math:`[0, 1]`."""
         return self.get('estimation')
 
     @estimation.setter
     def estimation(self, value: float) -> None:
         """ set estimation """
-        self.data['estimation'] = value
+        self.data['a_estimation'] = value
+
+    @property
+    def estimation_processed(self) -> float:
+        """Return the estimation for the amplitude after the post-processing has been applied."""
+        return self.get('estimation_processed')
+
+    @estimation_processed.setter
+    def estimation_processed(self, value: float) -> None:
+        """ set estimation """
+        self.data['estimation_processed'] = value
 
     @property
     def num_oracle_queries(self) -> int:
@@ -116,18 +140,17 @@ class AmplitudeEstimatorResult(AlgorithmResult):
         """ sets confidence interval """
         self.data['confidence_interval'] = confidence_interval
 
+    @property
+    def confidence_interval_processed(self) -> Tuple[float, float]:
+        """ returns the confidence interval (95% by default) """
+        return self.get('confidence_interval_processed')
+
+    @confidence_interval_processed.setter
+    def confidence_interval_processed(self, confidence_interval: Tuple[float, float]) -> None:
+        """ sets confidence interval """
+        self.data['confidence_interval_processed'] = confidence_interval
+
     @staticmethod
     def from_dict(a_dict: Dict) -> 'AmplitudeEstimationAlgorithmResult':
         """ create new object from a dictionary """
         return AmplitudeEstimatorResult(a_dict)
-
-    def __getitem__(self, key: object) -> object:
-        if key == '95%_confidence_interval':
-            warnings.warn('95%_confidence_interval deprecated, use confidence_interval property.',
-                          DeprecationWarning)
-            return super().__getitem__('confidence_interval')
-        elif key == 'value':
-            warnings.warn('value deprecated, use a_estimation property.', DeprecationWarning)
-            return super().__getitem__('a_estimation')
-
-        return super().__getitem__(key)
