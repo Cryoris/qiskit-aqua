@@ -115,7 +115,7 @@ class AmplitudeEstimation(AmplitudeEstimator):
 
         return circuit
 
-    def accumulate_measurements(self, circuit_result: Union[Dict[str, int], np.ndarray],
+    def accumulate_measurements(self, circuit_results: Union[Dict[str, int], np.ndarray],
                                 threshold: float = 1e-6,
                                 ) -> Tuple[Dict[int, float], Dict[float, float]]:
         """Evaluate the results from statevector simulation.
@@ -124,7 +124,7 @@ class AmplitudeEstimation(AmplitudeEstimator):
         probabilities that the measurements y/gridpoints a are the best estimate.
 
         Args:
-            circuit_result: The circuit result from the QAE circuit. Can be either a counts dict
+            circuit_results: The circuit result from the QAE circuit. Can be either a counts dict
                 or a statevector.
             threshold: Measurements with probabilities below the threshold are discarded.
 
@@ -133,10 +133,10 @@ class AmplitudeEstimation(AmplitudeEstimator):
                 y measurements with respective probabilities, in this order.
         """
         # compute grid sample and measurement dicts
-        if isinstance(circuit_result, dict):
-            samples, measurements = self._evaluate_count_results(circuit_result)
+        if isinstance(circuit_results, dict):
+            samples, measurements = self._evaluate_count_results(circuit_results)
         else:
-            samples, measurements = self._evaluate_statevector_results(circuit_result)
+            samples, measurements = self._evaluate_statevector_results(circuit_results)
 
         # cutoff probabilities below the threshold
         samples = {a: p for a, p in samples.items() if p > threshold}
@@ -266,7 +266,7 @@ class AmplitudeEstimation(AmplitudeEstimator):
             circuit = self.construct_circuit(estimation_problem, measurement=False)
             # run circuit on statevector simulator
             statevector = self._quantum_instance.execute(circuit).get_statevector()
-            result.circuit_result = statevector
+            result.circuit_results = statevector
 
             # store number of shots: convention is 1 shot for statevector,
             # needed so that MLE works!
@@ -275,12 +275,12 @@ class AmplitudeEstimation(AmplitudeEstimator):
             # run circuit on QASM simulator
             circuit = self.construct_circuit(estimation_problem, measurement=True)
             counts = self._quantum_instance.execute(circuit).get_counts()
-            result.circuit_result = counts
+            result.circuit_results = counts
 
             # store shots
             result.shots = sum(counts.values())
 
-        samples, measurements = self.accumulate_measurements(result.circuit_result)
+        samples, measurements = self.accumulate_measurements(result.circuit_results)
 
         result.samples = samples
         result.samples_processed = {estimation_problem.post_processing(a): p
@@ -330,7 +330,7 @@ class AmplitudeEstimation(AmplitudeEstimator):
             NotImplementedError: If the confidence interval method `kind` is not implemented.
         """
         # if statevector simulator the estimate is exact
-        if isinstance(result.circuit_result, (list, np.ndarray)):
+        if isinstance(result.circuit_results, (list, np.ndarray)):
             return (result.mle, result.mle)
 
         if kind in ['likelihood_ratio', 'lr']:

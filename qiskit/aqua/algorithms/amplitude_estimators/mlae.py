@@ -12,8 +12,7 @@
 
 """The Maximum Likelihood Amplitude Estimation algorithm."""
 
-from typing import Optional, List, Union, Tuple, Callable, Dict
-import warnings
+from typing import Optional, List, Union, Tuple, Dict
 import logging
 import numpy as np
 from scipy.optimize import brute
@@ -23,7 +22,6 @@ from qiskit.providers import BaseBackend
 from qiskit.providers import Backend
 from qiskit import ClassicalRegister, QuantumRegister, QuantumCircuit
 from qiskit.aqua import QuantumInstance, AquaError
-from qiskit.aqua.utils.circuit_factory import CircuitFactory
 from qiskit.aqua.utils.validation import validate_min
 from .ae_algorithm import AmplitudeEstimationAlgorithm, AmplitudeEstimationAlgorithmResult
 from .estimation_problem import EstimationProblem
@@ -51,13 +49,6 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
     """
 
     def __init__(self, num_oracle_circuits: int,
-                 state_preparation: Optional[Union[QuantumCircuit, CircuitFactory]] = None,
-                 grover_operator: Optional[Union[QuantumCircuit, CircuitFactory]] = None,
-                 objective_qubits: Optional[List[int]] = None,
-                 post_processing: Optional[Callable[[float], float]] = None,
-                 a_factory: Optional[CircuitFactory] = None,
-                 q_factory: Optional[CircuitFactory] = None,
-                 i_objective: Optional[int] = None,
                  likelihood_evals: Optional[int] = None,
                  quantum_instance: Optional[
                      Union[QuantumInstance, BaseBackend, Backend]] = None) -> None:
@@ -68,47 +59,13 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
                 `[id, Q^2^0, ..., Q^2^{num_oracle_circuits-1}] A |0>`, where A is the problem
                 unitary encoded in the argument `a_factory`.
                 Has a minimum value of 1.
-            state_preparation: A circuit preparing the input state, referred to as
-                :math:`\mathcal{A}`.
-            grover_operator: The Grover operator :math:`\mathcal{Q}` used as unitary in the
-                phase estimation circuit.
-            objective_qubits: A list of qubit indices. A measurement outcome is classified as
-                'good' state if all objective qubits are in state :math:`|1\rangle`, otherwise it
-                is classified as 'bad'.
-            post_processing: A mapping applied to the estimate of :math:`0 \leq a \leq 1`,
-                usually used to map the estimate to a target interval.
-            a_factory: The CircuitFactory subclass object representing the problem unitary.
-            q_factory: The CircuitFactory subclass object representing.
-                an amplitude estimation sample (based on a_factory)
-            i_objective: The index of the objective qubit, i.e. the qubit marking 'good' solutions
-                with the state \|1> and 'bad' solutions with the state \|0>
             likelihood_evals: The number of gridpoints for the maximum search of the likelihood
                 function
             quantum_instance: Quantum Instance or Backend
         """
         validate_min('num_oracle_circuits', num_oracle_circuits, 1)
 
-        # support legacy input if passed as positional arguments
-        if isinstance(state_preparation, CircuitFactory):
-            a_factory = state_preparation
-            state_preparation = None
-
-        if isinstance(grover_operator, CircuitFactory):
-            q_factory = grover_operator
-            grover_operator = None
-
-        if isinstance(objective_qubits, int):
-            i_objective = objective_qubits
-            objective_qubits = None
-
-        super().__init__(state_preparation=state_preparation,
-                         grover_operator=grover_operator,
-                         objective_qubits=objective_qubits,
-                         post_processing=post_processing,
-                         a_factory=a_factory,
-                         q_factory=q_factory,
-                         i_objective=i_objective,
-                         quantum_instance=quantum_instance)
+        super().__init__(quantum_instance)
 
         # get parameters
         self._evaluation_schedule = [0] + [2**j for j in range(num_oracle_circuits)]
@@ -120,12 +77,7 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
             self._likelihood_nevals = np.maximum(default,
                                                  int(np.pi / 2 * 1000 * 2 ** num_oracle_circuits))
 
-        self._circuits = []  # type: List[QuantumCircuit]
-
-        # TODO remove this, once ``self.confidence_interval()`` has reached the end of deprecation`
-        self._last_result = None  # type: MaximumLikelihoodAmplitudeEstimationResult
-
-    def construct_circuits(self, estimation_problem: Optional[EstimationProblem] = None,
+    def construct_circuits(self, estimation_problem: EstimationProblem,
                            measurement: bool = False) -> List[QuantumCircuit]:
         """Construct the Amplitude Estimation w/o QPE quantum circuits.
 
@@ -136,16 +88,6 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         Returns:
             A list with the QuantumCircuit objects for the algorithm.
         """
-        if isinstance(estimation_problem, bool):
-            warnings.warn('The first argument of construct_circuit is now an estimation problem.')
-            measurement = estimation_problem
-        elif estimation_problem is None:
-            warnings.warn('In future, construct_circuit must be passed an estimation problem.')
-
-        if estimation_problem is None:
-            estimation_problem = EstimationProblem(self.state_preparation, self.grover_operator,
-                                                   self.objective_qubits)
-
         # keep track of the Q-oracle queries
         circuits = []
 
@@ -180,7 +122,9 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
 
     @staticmethod
     def compute_confidence_interval(result: 'MaximumLikelihoodAmplitudeEstimationResult',
-                                    alpha: float, kind: str = 'fisher') -> Tuple[float, float]:
+                                    alpha: float,
+                                    kind: str = 'fisher',
+                                    apply_post_processing: bool = False) -> Tuple[float, float]:
         # pylint: disable=wrong-spelling-in-docstring
         """Compute the `alpha` confidence interval using the method `kind`.
 
@@ -193,6 +137,7 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
             alpha: The confidence level.
             kind: The method to compute the confidence interval. Defaults to 'fisher', which
                 computes the theoretical Fisher information.
+            apply_post_processing: If True, apply post-processing to the confidence interval.
 
         Returns:
             The specified confidence interval.
@@ -201,42 +146,28 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
             AquaError: If `run()` hasn't been called yet.
             NotImplementedError: If the method `kind` is not supported.
         """
+        interval = None
+
         # if statevector simulator the estimate is exact
         if all(isinstance(data, (list, np.ndarray)) for data in result.circuit_results):
-            return 2 * [result.estimation]
+            interval = 2 * [result.estimation]
 
         if kind in ['likelihood_ratio', 'lr']:
-            return _likelihood_ratio_confint(result, alpha)
+            interval = _likelihood_ratio_confint(result, alpha)
 
         if kind in ['fisher', 'fi']:
-            return _fisher_confint(result, alpha, observed=False)
+            interval = _fisher_confint(result, alpha, observed=False)
 
         if kind in ['observed_fisher', 'observed_information', 'oi']:
-            return _fisher_confint(result, alpha, observed=True)
+            interval = _fisher_confint(result, alpha, observed=True)
 
-        raise NotImplementedError('CI `{}` is not implemented.'.format(kind))
+        if interval is None:
+            raise NotImplementedError('CI `{}` is not implemented.'.format(kind))
 
-    def confidence_interval(self, alpha: float, kind: str = 'fisher') -> List[float]:
-        # pylint: disable=wrong-spelling-in-docstring
-        """Compute the `alpha` confidence interval using the method `kind`.
+        if apply_post_processing:
+            return tuple(result.post_processing(value) for value in interval)
 
-        The confidence level is (1 - `alpha`) and supported kinds are 'fisher',
-        'likelihood_ratio' and 'observed_fisher' with shorthand
-        notations 'fi', 'lr' and 'oi', respectively.
-
-        Args:
-            alpha: The confidence level.
-            kind: The method to compute the confidence interval. Defaults to 'fisher', which
-                computes the theoretical Fisher information.
-
-        Returns:
-            The specified confidence interval.
-
-        Raises:
-            AquaError: If `run()` hasn't been called yet.
-            NotImplementedError: If the method `kind` is not supported.
-        """
-        return list(self.compute_confidence_interval(self._last_result, alpha, kind))
+        return interval
 
     def compute_mle(self,
                     circuit_results: Union[List[Dict[str, int]], List[np.ndarray]],
@@ -320,45 +251,22 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         # store results
         result.theta = theta
         result.good_counts = good_counts
-        result.a_estimation = np.sin(result.theta)**2
-        result.estimation = result.post_processing(result.a_estimation)
+        result.estimation = np.sin(result.theta)**2
+        result.estimation_processed = result.post_processing(result.estimation)
         result.fisher_information = _compute_fisher_information(result)
         result.num_oracle_queries = result.shots * sum(k for k in result.evaluation_schedule)
 
         # compute and store confidence interval
         confidence_interval = self.compute_confidence_interval(result, alpha=0.05, kind='fisher')
         result.confidence_interval = confidence_interval
-
-        return result
-
-    def _run(self) -> 'MaximumLikelihoodAmplitudeEstimationResult':
-        # check if A factory or state_preparation has been set
-        if self.state_preparation is None:
-            if self._a_factory is None:
-                raise AquaError('Either the state_preparation variable or the a_factory '
-                                '(deprecated) must be set to run the algorithm.')
-
-        estimation_problem = EstimationProblem(self.state_preparation, self.grover_operator,
-                                               self.objective_qubits, self.post_processing)
-
-        result = self.estimate(estimation_problem)
-        self._last_result = result
+        result.confidence_interval_processed = tuple(estimation_problem.post_processing(value)
+                                                     for value in confidence_interval)
 
         return result
 
 
 class MaximumLikelihoodAmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
     """ MaximumLikelihoodAmplitudeEstimation Result."""
-
-    @property
-    def circuit_results(self) -> Optional[Union[List[np.ndarray], List[Dict[str, int]]]]:
-        """ return circuit results """
-        return self.get('circuit_results')
-
-    @circuit_results.setter
-    def circuit_results(self, value: Union[List[np.ndarray], List[Dict[str, int]]]) -> None:
-        """ set circuit results """
-        self.data['circuit_results'] = value
 
     @property
     def theta(self) -> float:
@@ -414,17 +322,6 @@ class MaximumLikelihoodAmplitudeEstimationResult(AmplitudeEstimationAlgorithmRes
     def from_dict(a_dict: Dict) -> 'MaximumLikelihoodAmplitudeEstimationResult':
         """ create new object from a dictionary """
         return MaximumLikelihoodAmplitudeEstimationResult(a_dict)
-
-    def __getitem__(self, key: object) -> object:
-        if key == 'statevectors':
-            warnings.warn('statevectors deprecated, use circuit_results property.',
-                          DeprecationWarning)
-            return super().__getitem__('circuit_results')
-        elif key == 'counts':
-            warnings.warn('counts deprecated, use circuit_results property.', DeprecationWarning)
-            return super().__getitem__('circuit_results')
-
-        return super().__getitem__(key)
 
 
 def _safe_min(array, default=0):

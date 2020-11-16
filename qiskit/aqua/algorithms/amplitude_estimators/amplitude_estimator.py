@@ -69,14 +69,14 @@ class AmplitudeEstimatorResult(AlgorithmResult):
     """The results object for amplitude estimation algorithms."""
 
     @property
-    def circuit_result(self) -> Optional[Union[np.ndarray, Dict[str, int]]]:
+    def circuit_results(self) -> Optional[Union[np.ndarray, Dict[str, int]]]:
         """ return circuit result """
-        return self.get('circuit_result')
+        return self.get('circuit_results')
 
-    @circuit_result.setter
-    def circuit_result(self, value: Union[np.ndarray, Dict[str, int]]) -> None:
+    @circuit_results.setter
+    def circuit_results(self, value: Union[np.ndarray, Dict[str, int]]) -> None:
         """ set circuit result """
-        self.data['circuit_result'] = value
+        self.data['circuit_results'] = value
 
     @property
     def shots(self) -> int:
