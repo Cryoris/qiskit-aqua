@@ -178,39 +178,10 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
 
         return circuits
 
-    def _evaluate_statevectors(self,
-                               num_state_qubits: int,
-                               statevectors: Union[List[List[complex]], List[np.ndarray]]
-                               ) -> List[float]:
-        """For each statevector compute the probability that |1> is measured in the objective qubit.
-
-        Args:
-            num_state_qubits: The number of state qubits.
-            statevectors: A list of statevectors.
-
-        Raises:
-            AquaError: If `construct_circuit` has not been called before. The `construct_circuit`
-                method sets an internal variable required in this method.
-
-        Returns:
-            The corresponding probabilities.
-        """
-        probabilities = []
-        num_qubits = int(np.log2(len(statevectors[0])))  # the total number of qubits
-        for statevector in statevectors:
-            p_k = 0.0
-            for i, amplitude in enumerate(statevector):
-                probability = np.abs(amplitude) ** 2
-                # consider only state qubits and revert bit order
-                bitstr = bin(i)[2:].zfill(num_qubits)[-num_state_qubits:][::-1]
-                if self.is_good_state(bitstr):
-                    p_k += probability
-            probabilities += [p_k]
-
-        return probabilities
-
     def _get_hits(self, num_state_qubits: int,
-                  circuit_results: List[Union[np.ndarray, List[float], Dict[str, int]]]
+                  circuit_results: List[Union[np.ndarray, List[float], Dict[str, int]]],
+                  is_good_state: Callable[[str], bool],
+                  objective_qubits: List[int],
                   ) -> Tuple[List[float], List[int]]:
         """Get the good and total counts.
 
@@ -223,12 +194,24 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         one_hits = []  # h_k: how often 1 has been measured, for a power Q^(m_k)
         all_hits = []  # shots_k: how often has been measured at a power Q^(m_k)
         if all(isinstance(data, (list, np.ndarray)) for data in circuit_results):
-            probabilities = self._evaluate_statevectors(num_state_qubits, circuit_results)
+            probabilities = []
+            num_qubits = int(np.log2(len(circuit_results[0])))  # the total number of qubits
+            for statevector in circuit_results:
+                p_k = 0.0
+                for i, amplitude in enumerate(statevector):
+                    probability = np.abs(amplitude) ** 2
+                    # consider only state qubits and revert bit order
+                    bitstr = bin(i)[2:].zfill(num_qubits)[-num_state_qubits:][::-1]
+                    objectives = [bitstr[index] for index in objective_qubits]
+                    if is_good_state(objectives):
+                        p_k += probability
+                probabilities += [p_k]
+
             one_hits = probabilities
             all_hits = np.ones_like(one_hits)
         else:
             for counts in circuit_results:
-                one_hits += [counts.get('1', 0)]  # return 0 if no key '1' found
+                one_hits += [counts.get('1', 0)]  # return 0 if no key '1' found  #
                 all_hits += [sum(counts.values())]
 
         return one_hits, all_hits
@@ -414,7 +397,9 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
             result.shots = self._quantum_instance._run_config.shots
 
         num_state_qubits = circuits[0].num_qubits - circuits[0].num_ancillas
-        one_hits, all_hits = self._get_hits(num_state_qubits, result.circuit_results)
+        one_hits, all_hits = self._get_hits(num_state_qubits, result.circuit_results,
+                                            estimation_problem.is_good_state,
+                                            estimation_problem.objective_qubits)
         result.one_hits = one_hits
         result.all_hits = all_hits
 
@@ -429,6 +414,15 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         result.confidence_interval = confidence_interval
 
         return result
+
+    # def estimate
+
+    # circuits = self.construct_circuits()
+
+    # res = execute(circuits, backend).result()
+    # circuit_results = [res.get_counts(circ) for circ in circuits]
+
+    # theta = self.compute_mle(circuit_results, likelihood_nevals=None)
 
     def _run(self) -> 'MaximumLikelihoodAmplitudeEstimationResult':
         # check if A factory or state_preparation has been set
@@ -449,77 +443,77 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
 class MaximumLikelihoodAmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
     """ MaximumLikelihoodAmplitudeEstimation Result."""
 
-    @property
+    @ property
     def circuit_results(self) -> Optional[Union[List[np.ndarray], List[Dict[str, int]]]]:
         """ return circuit results """
         return self.get('circuit_results')
 
-    @circuit_results.setter
+    @ circuit_results.setter
     def circuit_results(self, value: Union[List[np.ndarray], List[Dict[str, int]]]) -> None:
         """ set circuit results """
         self.data['circuit_results'] = value
 
-    @property
+    @ property
     def theta(self) -> float:
         """ returns theta """
         return self.get('theta')
 
-    @theta.setter
+    @ theta.setter
     def theta(self, value: float) -> None:
         """ set theta """
         self.data['theta'] = value
 
-    @property
+    @ property
     def likelihood_nevals(self) -> int:
         """ returns theta """
         return self.get('likelihood_nevals')
 
-    @likelihood_nevals.setter
+    @ likelihood_nevals.setter
     def likelihood_nevals(self, value: int) -> None:
         """ set theta """
         self.data['likelihood_nevals'] = value
 
-    @property
+    @ property
     def one_hits(self) -> List[float]:
         """ returns the percentage of one hits per circuit power """
         return self.get('one_hits')
 
-    @one_hits.setter
+    @ one_hits.setter
     def one_hits(self, hits: List[float]) -> None:
         """ sets the percentage of one hits per circuit power """
         self.data['one_hits'] = hits
 
-    @property
+    @ property
     def all_hits(self) -> List[int]:
         """ returns all hits per circuit power """
         return self.get('all_hits')
 
-    @all_hits.setter
+    @ all_hits.setter
     def all_hits(self, hits: List[int]) -> None:
         """ sets all hits per circuit power """
         self.data['all_hits'] = hits
 
-    @property
+    @ property
     def evaluation_schedule(self) -> List[int]:
         """ returns the evaluation schedule """
         return self.get('evaluation_schedule')
 
-    @evaluation_schedule.setter
+    @ evaluation_schedule.setter
     def evaluation_schedule(self, evaluation_schedule: List[int]) -> None:
         """ sets the evaluation schedule """
         self.data['evaluation_schedule'] = evaluation_schedule
 
-    @property
+    @ property
     def fisher_information(self) -> float:
         """ return fisher_information  """
         return self.get('fisher_information')
 
-    @fisher_information.setter
+    @ fisher_information.setter
     def fisher_information(self, value: float) -> None:
         """ set fisher_information """
         self.data['fisher_information'] = value
 
-    @staticmethod
+    @ staticmethod
     def from_dict(a_dict: Dict) -> 'MaximumLikelihoodAmplitudeEstimationResult':
         """ create new object from a dictionary """
         return MaximumLikelihoodAmplitudeEstimationResult(a_dict)

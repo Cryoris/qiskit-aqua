@@ -262,34 +262,45 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         return circuit
 
     def _probability_to_measure_one(self,
-                                    counts_or_statevector: Union[dict, List[complex], np.ndarray]
+                                    problem: EstimationProblem,
+                                    counts_or_statevector: Union[Dict[str, int], np.ndarray],
+                                    num_state_qubits: int,
                                     ) -> Union[Tuple[int, float], float]:
         """Get the probability to measure '1' in the last qubit.
 
         Args:
+            problem: The estimation problem, used to obtain the number of objective qubits and
+                the ``is_good_state`` function.
             counts_or_statevector: Either a counts-dictionary (with one measured qubit only!) or
                 the statevector returned from the statevector_simulator.
+            num_qubits: The number of state qubits.
 
         Returns:
             If a dict is given, return (#one-counts, #one-counts/#all-counts),
             otherwise Pr(measure '1' in the last qubit).
         """
-        if self.state_preparation is not None:
-            num_qubits = self.state_preparation.num_qubits - self.state_preparation.num_ancillas
-        else:
-            num_qubits = self._a_factory.num_target_qubits
-
         if isinstance(counts_or_statevector, dict):
-            one_counts = counts_or_statevector.get('1' * len(self.objective_qubits), 0)
+            one_counts = 0
+            for state, counts in counts_or_statevector.items():
+                if problem.is_good_state(state):
+                    one_counts += counts
+
             return int(one_counts), one_counts / sum(counts_or_statevector.values())
         else:
             statevector = counts_or_statevector
+            num_qubits = int(np.log2(len(statevector)))  # the total number of qubits
 
             # sum over all amplitudes where the objective qubit is 1
             prob = 0
             for i, amplitude in enumerate(statevector):
-                bitstr = ('{:0%db}' % num_qubits).format(i)[::-1]
-                if self.is_good_state(bitstr):
+                # bitstr = ('{:0%db}' % num_qubits).format(i)[::-1]
+                # if problem.is_good_state(bitstr):
+
+                # probability = np.abs(amplitude) ** 2
+                # consider only state qubits and revert bit order
+                bitstr = bin(i)[2:].zfill(num_qubits)[-num_state_qubits:][::-1]
+                objectives = [bitstr[index] for index in problem.objective_qubits]
+                if problem.is_good_state(objectives):
                     prob = prob + np.abs(amplitude)**2
 
             return prob
@@ -323,14 +334,15 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         # note, that no iterations here are necessary
         if self._quantum_instance.is_statevector:
             # simulate circuit
-            circuit = self.construct_circuit(k=0, measurement=False)
+            circuit = self.construct_circuit(estimation_problem, k=0, measurement=False)
             ret = self._quantum_instance.execute(circuit)
 
             # get statevector
             statevector = ret.get_statevector(circuit)
 
             # calculate the probability of measuring '1'
-            prob = self._probability_to_measure_one(statevector)
+            num_qubits = circuit.num_qubits - circuit.num_ancillas
+            prob = self._probability_to_measure_one(estimation_problem, statevector, num_qubits)
             prob = cast(float, prob)  # tell MyPy it's a float and not Tuple[int, float ]
 
             a_confidence_interval = [prob, prob]  # type: List[float]
@@ -359,14 +371,18 @@ class IterativeAmplitudeEstimation(AmplitudeEstimationAlgorithm):
                 ratios.append((2 * powers[-1] + 1) / (2 * powers[-2] + 1))
 
                 # run measurements for Q^k A|0> circuit
-                circuit = self.construct_circuit(k, measurement=True)
+                circuit = self.construct_circuit(estimation_problem, k, measurement=True)
                 ret = self._quantum_instance.execute(circuit)
 
                 # get the counts and store them
                 counts = ret.get_counts(circuit)
 
                 # calculate the probability of measuring '1', 'prob' is a_i in the paper
-                one_counts, prob = self._probability_to_measure_one(counts)  # type: ignore
+                num_qubits = circuit.num_qubits - circuit.num_ancillas
+                # type: ignore
+                one_counts, prob = self._probability_to_measure_one(estimation_problem, counts,
+                                                                    num_qubits)
+
                 num_one_shots.append(one_counts)
 
                 # track number of Q-oracle calls

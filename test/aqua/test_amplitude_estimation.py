@@ -106,7 +106,6 @@ class TestBernoulli(QiskitAquaTestCase):
     @unpack
     def test_statevector(self, prob, qae, expect):
         """ statevector test """
-        # construct factories for A and Q
         qae.quantum_instance = self._statevector
         problem = EstimationProblem(BernoulliStateIn(prob), BernoulliGrover(prob), [0])
 
@@ -126,11 +125,10 @@ class TestBernoulli(QiskitAquaTestCase):
     @unpack
     def test_qasm(self, prob, shots, qae, expect):
         """ qasm test """
-        # construct factories for A and Q
-        qae.state_preparation = BernoulliStateIn(prob)
-        qae.grover_operator = BernoulliGrover(prob)
+        qae.quantum_instance = self._qasm(shots)
+        problem = EstimationProblem(BernoulliStateIn(prob), BernoulliGrover(prob), [0])
 
-        result = qae.run(self._qasm(shots))
+        result = qae.estimate(problem)
         for key, value in expect.items():
             self.assertAlmostEqual(value, getattr(result, key), places=3,
                                    msg="estimate `{}` failed".format(key))
@@ -143,8 +141,9 @@ class TestBernoulli(QiskitAquaTestCase):
         """
         prob = 0.5
 
+        problem = EstimationProblem(BernoulliStateIn(prob), objective_qubits=[0])
         for m in [2, 5]:
-            qae = AmplitudeEstimation(m, BernoulliStateIn(prob))
+            qae = AmplitudeEstimation(m)
             angle = 2 * np.arcsin(np.sqrt(prob))
 
             # manually set up the inefficient AE circuit
@@ -181,7 +180,7 @@ class TestBernoulli(QiskitAquaTestCase):
             iqft = QFT(m, do_swaps=False).inverse()
             circuit.append(iqft.to_instruction(), qr_eval)
 
-            actual_circuit = qae.construct_circuit(measurement=False)
+            actual_circuit = qae.construct_circuit(problem, measurement=False)
 
             self.assertEqual(Operator(circuit), Operator(actual_circuit))
 
@@ -192,9 +191,10 @@ class TestBernoulli(QiskitAquaTestCase):
         Build the circuit manually and from the algorithm and compare the resulting unitaries.
         """
         prob = 0.5
+        problem = EstimationProblem(BernoulliStateIn(prob), objective_qubits=[0])
 
         for k in [2, 5]:
-            qae = IterativeAmplitudeEstimation(0.01, 0.05, state_preparation=BernoulliStateIn(prob))
+            qae = IterativeAmplitudeEstimation(0.01, 0.05)
             angle = 2 * np.arcsin(np.sqrt(prob))
 
             # manually set up the inefficient AE circuit
@@ -219,16 +219,17 @@ class TestBernoulli(QiskitAquaTestCase):
                 for _ in range(k):
                     circuit.compose(grover_op, inplace=True)
 
-            actual_circuit = qae.construct_circuit(k, measurement=False)
+            actual_circuit = qae.construct_circuit(problem, k, measurement=False)
             self.assertEqual(Operator(circuit), Operator(actual_circuit))
 
     @data(True, False)
     def test_mlae_circuits(self, efficient_circuit):
         """ Test the circuits constructed for MLAE """
         prob = 0.5
+        problem = EstimationProblem(BernoulliStateIn(prob), objective_qubits=[0])
 
         for k in [2, 5]:
-            qae = MaximumLikelihoodAmplitudeEstimation(k, state_preparation=BernoulliStateIn(prob))
+            qae = MaximumLikelihoodAmplitudeEstimation(k)
             angle = 2 * np.arcsin(np.sqrt(prob))
 
             # compute all the circuits used for MLAE
@@ -264,7 +265,7 @@ class TestBernoulli(QiskitAquaTestCase):
                     for _ in range(2**power):
                         circuit.compose(grover_op, inplace=True)
 
-            actual_circuits = qae.construct_circuits(measurement=False)
+            actual_circuits = qae.construct_circuits(problem, measurement=False)
 
             for actual, expected in zip(actual_circuits, circuits):
                 self.assertEqual(Operator(actual), Operator(expected))
@@ -359,9 +360,12 @@ class TestSineIntegral(QiskitAquaTestCase):
     def test_statevector(self, n, qae, expect):
         """ Statevector end-to-end test """
         # construct factories for A and Q
-        qae.state_preparation = SineIntegral(n)
+        # qae.state_preparation = SineIntegral(n)
+        qae.quantum_instance = self._statevector
+        estimation_problem = EstimationProblem(SineIntegral(n), objective_qubits=[n])
 
-        result = qae.run(self._statevector)
+        # result = qae.run(self._statevector)
+        result = qae.estimate(estimation_problem)
         self.assertGreater(self._statevector.time_taken, 0.)
         self._statevector.reset_execution_results()
         for key, value in expect.items():

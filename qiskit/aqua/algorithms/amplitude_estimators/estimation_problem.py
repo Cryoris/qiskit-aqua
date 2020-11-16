@@ -32,6 +32,7 @@ class EstimationProblem:
                  grover_operator: Optional[QuantumCircuit] = None,
                  objective_qubits: Optional[List[int]] = None,
                  post_processing: Optional[Callable[[float], float]] = None,
+                 is_good_state: Optional[Callable[[str], bool]] = None,
                  ) -> None:
         r"""
         Args:
@@ -45,11 +46,13 @@ class EstimationProblem:
                 is classified as 'bad'.
             post_processing: A mapping applied to the result of the algorithm
                 :math:`0 \leq a \leq 1`, usually used to map the estimate to a target interval.
+            is_good_state: A function to check whether a string represents a good state.
         """
         self._state_preparation = state_preparation
         self._grover_operator = grover_operator
         self._objective_qubits = objective_qubits
         self._post_processing = post_processing
+        self._is_good_state = is_good_state
 
     @property
     def state_preparation(self) -> QuantumCircuit:
@@ -89,6 +92,31 @@ class EstimationProblem:
             post_processing: A handle to the post processing function.
         """
         self._post_processing = post_processing
+
+    @property
+    def is_good_state(self) -> Callable[[str], float]:
+        """Checks whether a bitstring represents a good state.
+
+        Returns:
+            Handle to the ``is_good_state`` callable.
+        """
+        if self._is_good_state is None:
+            return lambda x: all(bit == '1' for bit in x)
+            # if self.objective_qubits is None:
+            #     raise ValueError('is_good_state can only be called if objective_qubits is set.')
+
+            # return lambda x: all(x[objective] == '1' for objective in self.objective_qubits)
+
+        return self._is_good_state
+
+    @is_good_state.setter
+    def is_good_state(self, is_good_state: Callable[[str], float]) -> None:
+        """Set the ``is_good_state`` function.
+
+        Args:
+            is_good_state: A function to determine whether a bitstring represents a good state.
+        """
+        self._is_good_state = is_good_state
 
     @property
     def grover_operator(self) -> Optional[QuantumCircuit]:
@@ -145,7 +173,7 @@ class EstimationProblem:
         return self._objective_qubits
 
     @objective_qubits.setter
-    def objective_qubits(self, objective_qubits: List[int]):
+    def objective_qubits(self, objective_qubits: List[int]) -> None:
         """Set the criterion for a measurement outcome to be in a 'good' state.
 
         Args:
