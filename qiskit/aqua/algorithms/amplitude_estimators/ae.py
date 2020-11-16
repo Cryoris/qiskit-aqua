@@ -193,7 +193,7 @@ class AmplitudeEstimation(AmplitudeEstimator):
         """
         m = result.num_evaluation_qubits
         M = 2 ** m  # pylint: disable=invalid-name
-        qae = result.a_estimation
+        qae = result.estimation
 
         # likelihood function
         a_i = np.asarray(list(result.samples.keys()))

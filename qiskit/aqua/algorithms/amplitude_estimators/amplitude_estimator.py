@@ -96,7 +96,7 @@ class AmplitudeEstimatorResult(AlgorithmResult):
     @estimation.setter
     def estimation(self, value: float) -> None:
         """ set estimation """
-        self.data['a_estimation'] = value
+        self.data['estimation'] = value
 
     @property
     def estimation_processed(self) -> float:

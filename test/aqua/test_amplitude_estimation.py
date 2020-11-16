@@ -272,64 +272,6 @@ class TestBernoulli(QiskitAquaTestCase):
 
 
 @ddt
-class TestProblemSetting(QiskitAquaTestCase):
-    """Test the setting and getting of the A and Q operator and the objective qubit index."""
-
-    def setUp(self):
-        super().setUp()
-        self.a_bernoulli = BernoulliStateIn(0)
-        self.q_bernoulli = BernoulliGrover(0)
-        self.i_bernoulli = [0]
-
-        num_qubits = 5
-        self.a_integral = SineIntegral(num_qubits)
-        oracle = QuantumCircuit(num_qubits + 1)
-        oracle.x(num_qubits)
-        oracle.z(num_qubits)
-        oracle.x(num_qubits)
-
-        self.q_integral = GroverOperator(oracle, self.a_integral)
-        self.i_integral = [num_qubits]
-
-    @data(AmplitudeEstimation(2),
-          IterativeAmplitudeEstimation(0.1, 0.001),
-          MaximumLikelihoodAmplitudeEstimation(3),
-          )
-    def test_operators(self, qae):
-        """ Test if A/Q operator + i_objective set correctly """
-        self.assertIsNone(qae.state_preparation)
-        self.assertIsNone(qae.grover_operator)
-        self.assertIsNone(qae.objective_qubits)
-        self.assertIsNone(qae._state_preparation)
-        self.assertIsNone(qae._grover_operator)
-        self.assertIsNone(qae._objective_qubits)
-
-        qae.state_preparation = self.a_bernoulli
-        self.assertIsNotNone(qae.state_preparation)
-        self.assertIsNotNone(qae.grover_operator)
-        self.assertIsNotNone(qae.objective_qubits)
-        self.assertIsNotNone(qae._state_preparation)
-        self.assertIsNone(qae._grover_operator)
-        self.assertIsNone(qae._objective_qubits)
-
-        qae.grover_operator = self.q_bernoulli
-        self.assertIsNotNone(qae.state_preparation)
-        self.assertIsNotNone(qae.grover_operator)
-        self.assertIsNotNone(qae.objective_qubits)
-        self.assertIsNotNone(qae._state_preparation)
-        self.assertIsNotNone(qae._grover_operator)
-        self.assertIsNone(qae._objective_qubits)
-
-        qae.objective_qubits = self.i_bernoulli
-        self.assertIsNotNone(qae.state_preparation)
-        self.assertIsNotNone(qae.grover_operator)
-        self.assertIsNotNone(qae.objective_qubits)
-        self.assertIsNotNone(qae._state_preparation)
-        self.assertIsNotNone(qae._grover_operator)
-        self.assertIsNotNone(qae._objective_qubits)
-
-
-@ddt
 class TestSineIntegral(QiskitAquaTestCase):
     """Tests based on the A operator to integrate sin^2(x).
 
@@ -429,11 +371,12 @@ class TestSineIntegral(QiskitAquaTestCase):
     def test_iqae_confidence_intervals(self):
         """End-to-end test for the IQAE confidence interval."""
         n = 3
-        qae = IterativeAmplitudeEstimation(0.1, 0.01, state_preparation=SineIntegral(n))
+        qae = IterativeAmplitudeEstimation(0.1, 0.01, quantum_instance=self._statevector)
         expected_confint = (0.19840508760087738, 0.35110155403424115)
+        estimation_problem = EstimationProblem(SineIntegral(n), objective_qubits=[n])
 
         # statevector simulator
-        result = qae.run(self._statevector)
+        result = qae.estimate(estimation_problem)
         self.assertGreater(self._statevector.time_taken, 0.)
         self._statevector.reset_execution_results()
         confint = result.confidence_interval
@@ -443,7 +386,8 @@ class TestSineIntegral(QiskitAquaTestCase):
 
         # qasm simulator
         shots = 100
-        result = qae.run(self._qasm(shots))
+        qae.quantum_instance = self._qasm(shots)
+        result = qae.estimate(estimation_problem)
         confint = result.confidence_interval
         self.assertEqual(confint, expected_confint)
         self.assertTrue(confint[0] <= result.estimation <= confint[1])

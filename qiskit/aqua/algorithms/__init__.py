@@ -200,7 +200,6 @@ from .vq_algorithm import VQAlgorithm, VQResult
 from .amplitude_amplifiers import Grover, GroverResult
 from .amplitude_estimators import (AmplitudeEstimator,
                                    AmplitudeEstimatorResult,
-                                   AmplitudeEstimationAlgorithmResult,
                                    AmplitudeEstimation,
                                    AmplitudeEstimationResult,
                                    IterativeAmplitudeEstimation,
@@ -256,7 +255,6 @@ __all__ = [
     'QPEResult',
     'AmplitudeEstimator',
     'AmplitudeEstimatorResult',
-    'AmplitudeEstimationAlgorithmResult',
     'AmplitudeEstimation',
     'AmplitudeEstimationResult',
     'IterativeAmplitudeEstimation',

@@ -23,13 +23,13 @@ from qiskit.providers import Backend
 from qiskit import ClassicalRegister, QuantumRegister, QuantumCircuit
 from qiskit.aqua import QuantumInstance, AquaError
 from qiskit.aqua.utils.validation import validate_min
-from .ae_algorithm import AmplitudeEstimationAlgorithm, AmplitudeEstimationAlgorithmResult
+from .amplitude_estimator import AmplitudeEstimator, AmplitudeEstimatorResult
 from .estimation_problem import EstimationProblem
 
 logger = logging.getLogger(__name__)
 
 
-class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
+class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimator):
     """The Maximum Likelihood Amplitude Estimation algorithm.
 
     This class implements the quantum amplitude estimation (QAE) algorithm without phase
@@ -265,7 +265,7 @@ class MaximumLikelihoodAmplitudeEstimation(AmplitudeEstimationAlgorithm):
         return result
 
 
-class MaximumLikelihoodAmplitudeEstimationResult(AmplitudeEstimationAlgorithmResult):
+class MaximumLikelihoodAmplitudeEstimationResult(AmplitudeEstimatorResult):
     """ MaximumLikelihoodAmplitudeEstimation Result."""
 
     @property
@@ -354,7 +354,7 @@ def _compute_fisher_information(result: 'MaximumLikelihoodAmplitudeEstimationRes
     Raises:
         KeyError: Call run() first!
     """
-    a = result.a_estimation
+    a = result.estimation
 
     # Corresponding angle to the value a (only use real part of 'a')
     theta_a = np.arcsin(np.sqrt(np.real(a)))
@@ -417,7 +417,7 @@ def _fisher_confint(result: MaximumLikelihoodAmplitudeEstimationResult,
         fisher_information = _compute_fisher_information(result, observed=True)
 
     normal_quantile = norm.ppf(1 - alpha / 2)
-    confint = np.real(result.a_estimation) + \
+    confint = np.real(result.estimation) + \
         normal_quantile / np.sqrt(fisher_information) * np.array([-1, 1])
     mapped_confint = tuple(result.post_processing(bound) for bound in confint)
     return mapped_confint
