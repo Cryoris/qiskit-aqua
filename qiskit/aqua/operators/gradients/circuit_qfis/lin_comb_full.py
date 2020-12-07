@@ -58,6 +58,9 @@ class LinCombFull(CircuitQFI):
             TypeError: If ``operator`` is an unsupported type.
         """
 
+        return self._convert(operator, params)
+
+    def _convert(self, operator, params):
         # QFI & phase fix observable
         qfi_observable = ~StateFn(4 * Z ^ (I ^ operator.num_qubits))
         phase_fix_observable = ~StateFn((X + 1j * Y) ^ (I ^ operator.num_qubits))
@@ -370,6 +373,98 @@ class LinCombFull(CircuitQFI):
                     qfi_ops = [qfi_op + phase_fix]
                 else:
                     qfi_ops += [qfi_op + phase_fix]
+            qfi_operators.append(ListOp(qfi_ops))
+        # Return the full QFI
+        return ListOp(qfi_operators)
+
+    def _new_convert(self, operator, params):
+        # QFI & phase fix observable
+        qfi_observable = ~StateFn(4 * Z ^ (I ^ operator.num_qubits))
+        phase_fix_observable = ~StateFn((X + 1j * Y) ^ (I ^ operator.num_qubits))
+        # see https://arxiv.org/pdf/quant-ph/0108146.pdf
+
+        # Check if the given operator corresponds to a quantum state given as a circuit.
+        if not isinstance(operator, CircuitStateFn):
+            raise TypeError(
+                'LinCombFull is only compatible with states that are given as CircuitStateFn')
+
+        # If a single parameter is given wrap it into a list.
+        if not isinstance(params, (list, np.ndarray)):
+            params = [params]
+
+        # First, the operators are computed which can compensate for a potential phase-mismatch
+        # between target and trained state, i.e.〈ψ|∂lψ〉
+        phase_fix_states = [LinComb()._gradient_states(
+            operator, meas_op=phase_fix_observable, target_params=params, open_ctrl=False,
+            trim_after_grad_gate=True
+        )]
+
+        # Get  4 * Re[〈∂kψ|∂lψ]
+        qfi_operators = []
+        # Add a working qubit
+        qr_work = QuantumRegister(1, 'work_qubit')
+        state_qc = QuantumCircuit(*operator.primitive.qregs, qr_work)
+        state_qc.h(qr_work)
+        state_qc.compose(operator.primitive, inplace=True)
+
+        # Get the circuits needed to compute〈∂iψ|∂jψ〉
+        for i, param_i in enumerate(params):  # loop over parameters
+            qfi_ops = []
+            for j, param_j in enumerate(params):
+                # Get the gates of the quantum state which are parameterized by param_i
+                qfi_op = []
+                param_gates_i = state_qc._parameter_table[param_i]
+                for gate_i, idx_i in param_gates_i:
+                    grad_coeffs_i, grad_gates_i = LinComb._gate_gradient_dict(gate_i)[idx_i]
+
+                    for grad_coeff_i, grad_gate_i in zip(grad_coeffs_i, grad_gates_i):
+
+                        qfi_circuit = LinComb.apply_grad_gate(
+                            state_qc, gate_i, idx_i, grad_gate_i, grad_coeff_i, qr_work,
+                            open_control=True, trim_after_grad_gate=(j < i)
+                        )
+
+                        # Get the gates of the quantum state which are parameterized by param_j
+                        param_gates_j = state_qc._parameter_table[param_j]
+                        for gate_j, idx_j in param_gates_j:
+                            grad_coeffs_j, grad_gates_j = LinComb._gate_gradient_dict(gate_j)[idx_j]
+
+                            for grad_coeff_j, grad_gate_j in zip(grad_coeffs_j, grad_gates_j):
+
+                                # create a copy of the original circuit with the same registers
+                                qfi_circuit = LinComb.apply_grad_gate(
+                                    qfi_circuit, gate_j, idx_j, grad_gate_j, grad_coeff_j, qr_work,
+                                    open_control=True, trim_after_grad_gate=(j >= i)
+                                )
+
+                                qfi_circuit.h(qr_work)
+                                # Convert the quantum circuit into a CircuitStateFn and add the
+                                # coefficients i, j and the original operator coefficient
+                                coeff = operator.coeff
+                                coeff = np.sqrt(np.abs(grad_coeff_i) * np.abs(grad_coeff_j))
+                                state = CircuitStateFn(qfi_circuit, coeff=coeff)
+
+                                param_grad = 1
+                                for gate, idx, param in zip(
+                                    [gate_i, gate_j], [idx_i, idx_j], [param_i, param_j]
+                                ):
+                                    param_expression = gate.params[idx]
+                                    param_grad *= param_expression.gradient(param)
+
+                                term = param_grad * qfi_observable @ state
+
+                                qfi_op.append(term)
+
+                # Compute −4 * Re(〈∂kψ|ψ〉〈ψ|∂lψ〉)
+                def phase_fix_combo_fn(x):
+                    return 4 * (-0.5) * (x[0] * np.conjugate(x[1]) + x[1] * np.conjugate(x[0]))
+
+                phase_fix = ListOp([phase_fix_states[i], phase_fix_states[j]],
+                                   combo_fn=phase_fix_combo_fn)
+                # Add the phase fix quantities to the entries of the QFI
+                # Get 4 * Re[〈∂kψ|∂lψ〉−〈∂kψ|ψ〉〈ψ|∂lψ〉]
+                qfi_ops += [qfi_op + phase_fix]
+
             qfi_operators.append(ListOp(qfi_ops))
         # Return the full QFI
         return ListOp(qfi_operators)
