@@ -17,7 +17,7 @@ from typing import List, Union, Optional, Tuple
 
 import numpy as np
 from qiskit.aqua import AquaError
-from qiskit.aqua.operators import ListOp
+from qiskit.aqua.operators import ListOp, SummedOp
 from qiskit.aqua.operators.operator_globals import I, Z, Y, X
 from qiskit.aqua.operators.state_fns import StateFn, CircuitStateFn
 from qiskit.circuit import Gate, Qubit
@@ -419,11 +419,6 @@ class LinCombFull(CircuitQFI):
 
                     for grad_coeff_i, grad_gate_i in zip(grad_coeffs_i, grad_gates_i):
 
-                        qfi_circuit = LinComb.apply_grad_gate(
-                            state_qc, gate_i, idx_i, grad_gate_i, grad_coeff_i, qr_work,
-                            open_control=True, trim_after_grad_gate=(j < i)
-                        )
-
                         # Get the gates of the quantum state which are parameterized by param_j
                         param_gates_j = state_qc._parameter_table[param_j]
                         for gate_j, idx_j in param_gates_j:
@@ -431,10 +426,19 @@ class LinCombFull(CircuitQFI):
 
                             for grad_coeff_j, grad_gate_j in zip(grad_coeffs_j, grad_gates_j):
 
+                                grad_coeff_ij = np.conj(grad_coeff_i) * grad_coeff_j
+                                qfi_circuit = LinComb.apply_grad_gate(
+                                    state_qc, gate_i, idx_i, grad_gate_i, grad_coeff_ij, qr_work,
+                                    open_control=True, trim_after_grad_gate=(j < i)
+                                )
+
+                                print('after first')
+                                print(qfi_circuit.draw())
+
                                 # create a copy of the original circuit with the same registers
                                 qfi_circuit = LinComb.apply_grad_gate(
-                                    qfi_circuit, gate_j, idx_j, grad_gate_j, grad_coeff_j, qr_work,
-                                    open_control=True, trim_after_grad_gate=(j >= i)
+                                    qfi_circuit, gate_j, idx_j, grad_gate_j, 1, qr_work,
+                                    open_control=False, trim_after_grad_gate=(j >= i)
                                 )
 
                                 qfi_circuit.h(qr_work)
@@ -463,7 +467,7 @@ class LinCombFull(CircuitQFI):
                                    combo_fn=phase_fix_combo_fn)
                 # Add the phase fix quantities to the entries of the QFI
                 # Get 4 * Re[〈∂kψ|∂lψ〉−〈∂kψ|ψ〉〈ψ|∂lψ〉]
-                qfi_ops += [qfi_op + phase_fix]
+                qfi_ops += [SummedOp(qfi_op) + phase_fix]
 
             qfi_operators.append(ListOp(qfi_ops))
         # Return the full QFI

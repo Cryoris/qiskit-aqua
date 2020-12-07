@@ -465,6 +465,9 @@ class LinComb(CircuitGradient):
                 out._update_parameter_table(rz_plus)
                 out._update_parameter_table(rz_minus)
 
+            if open_control:
+                replacement += [(XGate(), qr_superpos[:], [])]
+
             if not trim_after_grad_gate:
                 replacement.append((gate, gate_qubits, []))
 
@@ -472,14 +475,15 @@ class LinComb(CircuitGradient):
             # gradient gate is applied after the original gate in this case
             replacement.append((gate, gate_qubits, []))
             replacement.append((grad_gate, qr_superpos[:] + gate_qubits, []))
+            if open_control:
+                replacement += [(XGate(), qr_superpos[:], [])]
 
         else:
             replacement.append((grad_gate, qr_superpos[:] + gate_qubits, []))
+            if open_control:
+                replacement += [(XGate(), qr_superpos[:], [])]
             if not trim_after_grad_gate:
                 replacement.append((gate, gate_qubits, []))
-
-        if open_control:
-            replacement += [(XGate(), qr_superpos[:], [])]
 
         # replace the parameter we compute the derivative of with the replacement
         # TODO can this be done more efficiently?
