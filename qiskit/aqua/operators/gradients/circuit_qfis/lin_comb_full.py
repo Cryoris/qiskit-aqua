@@ -58,7 +58,7 @@ class LinCombFull(CircuitQFI):
             TypeError: If ``operator`` is an unsupported type.
         """
 
-        return self._convert(operator, params)
+        return self._new_convert(operator, params)
 
     def _convert(self, operator, params):
         # QFI & phase fix observable
@@ -394,10 +394,14 @@ class LinCombFull(CircuitQFI):
 
         # First, the operators are computed which can compensate for a potential phase-mismatch
         # between target and trained state, i.e.〈ψ|∂lψ〉
-        phase_fix_states = [LinComb()._gradient_states(
+        gradient_states = LinComb()._gradient_states(
             operator, meas_op=phase_fix_observable, target_params=params, open_ctrl=False,
             trim_after_grad_gate=True
-        )]
+        )
+        if type(gradient_states) == ListOp:  # pylint: disable=unidiomatic-typecheck
+            phase_fix_states = gradient_states.oplist
+        else:
+            phase_fix_states = [gradient_states]
 
         # Get  4 * Re[〈∂kψ|∂lψ]
         qfi_operators = []
@@ -429,23 +433,20 @@ class LinCombFull(CircuitQFI):
                                 grad_coeff_ij = np.conj(grad_coeff_i) * grad_coeff_j
                                 qfi_circuit = LinComb.apply_grad_gate(
                                     state_qc, gate_i, idx_i, grad_gate_i, grad_coeff_ij, qr_work,
-                                    open_control=True, trim_after_grad_gate=(j < i)
+                                    open_control=True, trim_after_grad_gate=False  # (j < i)
                                 )
-
-                                print('after first')
-                                print(qfi_circuit.draw())
 
                                 # create a copy of the original circuit with the same registers
                                 qfi_circuit = LinComb.apply_grad_gate(
                                     qfi_circuit, gate_j, idx_j, grad_gate_j, 1, qr_work,
-                                    open_control=False, trim_after_grad_gate=(j >= i)
+                                    open_control=False, trim_after_grad_gate=False  # (j >= i)
                                 )
 
                                 qfi_circuit.h(qr_work)
                                 # Convert the quantum circuit into a CircuitStateFn and add the
                                 # coefficients i, j and the original operator coefficient
                                 coeff = operator.coeff
-                                coeff = np.sqrt(np.abs(grad_coeff_i) * np.abs(grad_coeff_j))
+                                coeff *= np.sqrt(np.abs(grad_coeff_i) * np.abs(grad_coeff_j))
                                 state = CircuitStateFn(qfi_circuit, coeff=coeff)
 
                                 param_grad = 1
@@ -454,8 +455,9 @@ class LinCombFull(CircuitQFI):
                                 ):
                                     param_expression = gate.params[idx]
                                     param_grad *= param_expression.gradient(param)
+                                meas = param_grad * qfi_observable
 
-                                term = param_grad * qfi_observable @ state
+                                term = meas @ state
 
                                 qfi_op.append(term)
 

@@ -27,6 +27,7 @@ from qiskit.aqua.operators.state_fns import StateFn, CircuitStateFn, DictStateFn
 from qiskit.circuit import Gate, Instruction, Qubit
 from qiskit.circuit import (QuantumCircuit, QuantumRegister, ParameterVector,
                             ParameterExpression, Parameter)
+from qiskit.circuit.parametertable import ParameterTable
 from qiskit.circuit.controlledgate import ControlledGate
 from qiskit.circuit.library import SGate, SdgGate
 from qiskit.circuit.library.standard_gates import (CXGate, CYGate, CZGate,
@@ -417,7 +418,6 @@ class LinComb(CircuitGradient):
         # copy the input circuit taking the gates by reference
         out = QuantumCircuit(*circuit.qregs)
         out._data = circuit._data.copy()
-        from qiskit.circuit.parametertable import ParameterTable
         out._parameter_table = ParameterTable({
             param: values.copy() for param, values in circuit._parameter_table.items()
         })
@@ -489,6 +489,19 @@ class LinComb(CircuitGradient):
         # TODO can this be done more efficiently?
         if trim_after_grad_gate:  # remove everything after the gradient gate
             out._data[gate_idx:gate_idx + 1] = replacement
+            # reset parameter table
+            table = ParameterTable()
+            for op, _, _ in out._data:
+                for idx, param_expression in enumerate(op.params):
+                    if isinstance(param_expression, ParameterExpression):
+                        for param in param_expression.parameters:
+                            if param not in table.keys():
+                                table[param] = [(op, idx)]
+                            else:
+                                table[param].append((op, idx))
+
+            out._parameter_table = table
+
         else:
             out._data[gate_idx:gate_idx + 1] = replacement
 
