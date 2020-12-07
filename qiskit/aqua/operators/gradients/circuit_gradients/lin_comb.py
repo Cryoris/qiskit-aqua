@@ -925,3 +925,103 @@ class LinComb(CircuitGradient):
                 oplist += [SummedOp(sub_oplist) if len(sub_oplist) > 1 else sub_oplist[0]]
 
         return ListOp(oplist) if len(oplist) > 1 else oplist[0]
+
+    def _new_hessian_states(self,
+                            state_op: StateFn,
+                            meas_op: Optional[OperatorBase] = None,
+                            target_params: Optional[Union[Tuple[ParameterExpression,
+                                                                ParameterExpression],
+                                                          List[Tuple[ParameterExpression,
+                                                                     ParameterExpression]]]] = None
+                            ) -> OperatorBase:
+        """Generate the operator states whose evaluation returns the Hessian (items).
+
+        Args:
+            state_op: The operator representing the quantum state for which we compute the Hessian.
+            meas_op: The operator representing the observable for which we compute the gradient.
+            target_params: The parameters we are computing the Hessian wrt: ω
+
+        Returns:
+            Operators which give the Hessian. If a parameter appears multiple times, one circuit is
+            created per parameterized gates to compute the product rule.
+
+        Raises:
+            AquaError: If one of the circuits could not be constructed.
+            TypeError: If ``operator`` is of unsupported type.
+        """
+        if not isinstance(target_params, list):
+            target_params = [target_params]
+
+        if not all(isinstance(params, tuple) for params in target_params):
+            raise TypeError('Please define in the parameters for which the Hessian is evaluated '
+                            'either as parameter tuple or a list of parameter tuples')
+
+        # create circuit with two additional qubits
+        qr_add0 = QuantumRegister(1, 's0')
+        qr_add1 = QuantumRegister(1, 's1')
+        state_qc = QuantumCircuit(*state_op.primitive.qregs, qr_add0, qr_add1)
+
+        # add hadamards
+        state_qc.h(qr_add0)
+        state_qc.h(qr_add1)
+
+        # compose with the original circuit
+        state_qc.compose(state_op.primitive, inplace=True)
+
+        # create a copy of the original circuit with an additional working qubit register
+        oplist = []
+        for param_a, param_b in target_params:
+            if param_a not in state_qc.parameters or param_b not in state_qc.parameters:
+                oplist += [~Zero @ One]
+            else:
+                sub_oplist = []
+                param_gates_a = state_qc._parameter_table[param_a]
+                param_gates_b = state_qc._parameter_table[param_b]
+                for gate_a, idx_a in param_gates_a:
+                    grad_coeffs_a, grad_gates_a = self._gate_gradient_dict(gate_a)[idx_a]
+
+                    for grad_coeff_a, grad_gate_a in zip(grad_coeffs_a, grad_gates_a):
+                        grad_circuit = self.apply_grad_gate(
+                            state_qc, gate_a, idx_a, grad_gate_a, grad_coeff_a, qr_add0
+                        )
+
+                        for gate_b, idx_b in param_gates_b:
+                            grad_coeffs_b, grad_gates_b = self._gate_gradient_dict(gate_b)[idx_b]
+
+                            for grad_coeff_b, grad_gate_b in zip(grad_coeffs_b, grad_gates_b):
+                                hessian_circuit = self.apply_grad_gate(
+                                    grad_circuit, gate_b, idx_b, grad_gate_b, grad_coeff_b, qr_add1
+                                )
+
+                                # final hadamards and CZ
+                                hessian_circuit.h(qr_add0)
+                                hessian_circuit.cz(qr_add1[0], qr_add0[0])
+                                hessian_circuit.h(qr_add1)
+
+                                coeff = state_op.coeff
+                                coeff *= np.sqrt(np.abs(grad_coeff_a) * np.abs(grad_coeff_b))
+                                state = CircuitStateFn(hessian_circuit, coeff=coeff)
+
+                                if meas_op is not None:
+                                    state = meas_op @ state
+                                else:
+                                    state = ListOp([state], combo_fn=partial(self._hess_combo_fn,
+                                                                             state_op=state_op))
+
+                                # Chain Rule Parameter Expression
+                                param_grad = 1
+                                for gate, idx, param in zip(
+                                    [gate_a, gate_b], [idx_a, idx_b], [param_a, param_b]
+                                ):
+                                    param_expression = gate.params[idx]
+                                    if param_expression != param:  # need to apply chain rule
+                                        param_grad *= param_expression.gradient(param)
+
+                                if param_grad != 1:
+                                    state *= param_grad
+
+                                sub_oplist += [state]
+
+            oplist += [SummedOp(sub_oplist) if len(sub_oplist) > 1 else sub_oplist[0]]
+
+        return ListOp(oplist) if len(oplist) > 1 else oplist[0]
