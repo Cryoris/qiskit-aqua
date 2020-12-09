@@ -895,6 +895,7 @@ class TestGradients(QiskitAquaTestCase):
             result = prob_grad(value)
             np.testing.assert_array_almost_equal(result, correct_values[i], decimal=1)
 
+    @unittest.skip('too long?')
     def test_vqe(self):
         """Test VQE with gradients"""
         method = 'lin_comb'
