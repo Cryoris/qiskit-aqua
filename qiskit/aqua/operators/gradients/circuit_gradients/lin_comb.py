@@ -13,6 +13,7 @@
 """The module to compute the state gradient with the linear combination method."""
 
 from collections.abc import Iterable
+import warnings
 from copy import deepcopy
 from functools import partial
 from itertools import product
@@ -38,7 +39,6 @@ from qiskit.circuit.library.standard_gates import (CXGate, CYGate, CZGate,
 from qiskit.quantum_info import partial_trace
 
 from .circuit_gradient import CircuitGradient
-from ..derivative_base import DerivativeBase
 
 
 class LinComb(CircuitGradient):
@@ -57,23 +57,21 @@ class LinComb(CircuitGradient):
                                        List[Tuple[ParameterExpression, ParameterExpression]]]]
                 = None,
                 ) -> OperatorBase:
-        """ Convert the given operator into an operator object that represents the gradient w.r.t.
-            params
+        """Convert ``operator`` into an operator that represents the gradient w.r.t. ``params``.
 
         Args:
             operator: The operator we are taking the gradient of: ⟨ψ(ω)|O(θ)|ψ(ω)〉
             params: The parameters we are taking the gradient wrt: ω
-                    If a ParameterExpression, ParameterVector or List[ParameterExpression] is given,
-                    then the 1st order derivative of the operator is calculated.
-                    If a Tuple[ParameterExpression, ParameterExpression] or
-                    List[Tuple[ParameterExpression, ParameterExpression]]
-                    is given, then the 2nd order derivative of the operator is calculated.
+                If a ``ParameterExpression``, ``ParameterVector`` or ``List[ParameterExpression]``
+                is given, then the 1st order derivative of the operator is calculated.
+                If a ``Tuple[ParameterExpression, ParameterExpression]`` or
+                ``List[Tuple[ParameterExpression, ParameterExpression]]``
+                is given, then the 2nd order derivative of the operator is calculated.
 
         Returns:
             An operator corresponding to the gradient resp. Hessian. The order is in accordance with
             the order of the given parameters.
         """
-
         return self._prepare_operator(operator, params)
 
     # pylint: disable=too-many-return-statements
@@ -85,33 +83,36 @@ class LinComb(CircuitGradient):
                                                  List[Tuple[ParameterExpression,
                                                             ParameterExpression]]]] = None
                           ) -> OperatorBase:
-        """ Traverse through the given operator to get back the adapted operator representing the
-            gradient
+        """Traverse the given operator to get back the adapted operator representing the gradient.
 
         Args:
             operator: The operator we are taking the gradient of: ⟨ψ(ω)|O(θ)|ψ(ω)〉
             params: The parameters we are taking the gradient wrt: ω
-                    If a ParameterExpression, ParameterVector or List[ParameterExpression] is given,
-                    then the 1st order derivative of the operator is calculated.
-                    If a Tuple[ParameterExpression, ParameterExpression] or
-                    List[Tuple[ParameterExpression, ParameterExpression]]
-                    is given, then the 2nd order derivative of the operator is calculated.
+                If a ``ParameterExpression```, ``ParameterVector`` or ``List[ParameterExpression]``
+                is given, then the 1st order derivative of the operator is calculated.
+                If a ``Tuple[ParameterExpression, ParameterExpression]`` or
+                ``List[Tuple[ParameterExpression, ParameterExpression]]``
+                is given, then the 2nd order derivative of the operator is calculated.
 
         Returns:
-            Adapted operator.
-                Measurement operators are attached with an additional Z term acting
-                on an additional working qubit.
-                Quantum states - which must be given as circuits - are adapted. An additional
-                working qubit controls intercepting gates.
-                See e.g. Evaluating analytic gradients on quantum hardware
-                    Maria Schuld, Ville Bergholm, Christian Gogolin, Josh Izaac, and Nathan Killoran
-                    Phys. Rev. A 99, 032331 – Published 21 March 2019
+            The adapted operator.
+            Measurement operators are attached with an additional Z term acting
+            on an additional working qubit.
+            Quantum states - which must be given as circuits - are adapted. An additional
+            working qubit controls intercepting gates.
+            See e.g. [1].
 
         Raises:
             ValueError: If ``operator`` does not correspond to an expectation value.
             TypeError: If the ``StateFn`` corresponding to the quantum state could not be extracted
                        from ``operator``.
             AquaError: If third or higher order gradients are requested.
+
+        References:
+            [1]: Evaluating analytic gradients on quantum hardware
+                 Maria Schuld, Ville Bergholm, Christian Gogolin, Josh Izaac, and Nathan Killoran
+                 Phys. Rev. A 99, 032331 – Published 21 March 2019
+
         """
 
         if isinstance(operator, ComposedOp):
@@ -395,6 +396,9 @@ class LinComb(CircuitGradient):
         Raises:
             AquaError: Gate insertion fail
         """
+        warnings.warn('The LinComb.insert_gate method is deprecated as of Qiskit Terra '
+                      '0.17.0 and will be removed no earlier than 3 months after the release.',
+                      DeprecationWarning, stacklevel=2)
 
         if isinstance(gate_to_insert, IGate):
             return
@@ -414,7 +418,31 @@ class LinComb(CircuitGradient):
 
     @staticmethod
     def apply_grad_gate(circuit, gate, param_index, grad_gate, grad_coeff, qr_superpos,
-                        open_control=False, trim_after_grad_gate=False):
+                        open_ctrl=False, trim_after_grad_gate=False):
+        """Util function to apply a gradient gate for the linear combination of unitaries method.
+
+        Replaces the ``gate`` instance in ``circuit`` with ``grad_gate`` using ``qr_superpos`` as
+        superposition qubit. Also adds the appropriate sign-fix gates on the superposition qubit.
+
+        Args:
+            circuit (QuantumCircuit): The circuit in which to do the replacements.
+            gate (Gate): The gate instance to replace.
+            param_index (int): The index of the parameter in ``gate``.
+            grad_gate (Gate): A controlled gate encoding the gradient of ``gate``.
+            grad_coeff (float): A coefficient to the gradient component. Might not be one if the
+                gradient contains multiple summed terms.
+            qr_superpos (QuantumRegister): A ``QuantumRegister`` of size 1 contained in ``circuit``
+                that is used as control for ``grad_gate``.
+            open_ctrl (bool): If True use an open control for ``grad_gate`` instead of closed.
+            trim_after_grad_gate (bool): If True remove all gates after the ``grad_gate``. Can
+                be used to reduce the circuit depth in e.g. computing an overlap of gradients.
+
+        Returns:
+            QuantumCircuit: A copy of the original circuit with the gradient gate added.
+
+        Raises:
+            RuntimeError: If ``gate`` is not in ``circuit``.
+        """
         # copy the input circuit taking the gates by reference
         out = QuantumCircuit(*circuit.qregs)
         out._data = circuit._data.copy()
@@ -429,7 +457,7 @@ class LinComb(CircuitGradient):
                 gate_idx, gate_qubits = i, qarg
                 break
         if gate_idx is None:
-            raise ValueError('gate not in circuit')
+            raise RuntimeError('The specified gate could not be found in the circuit data.')
 
         # initialize replacement instructions
         replacement = []
@@ -447,7 +475,7 @@ class LinComb(CircuitGradient):
         # else no additional gate required
 
         # open control if specified
-        if open_control:
+        if open_ctrl:
             replacement += [(XGate(), qr_superpos[:], [])]
 
         # compute the replacement
@@ -465,7 +493,7 @@ class LinComb(CircuitGradient):
                 out._update_parameter_table(rz_plus)
                 out._update_parameter_table(rz_minus)
 
-            if open_control:
+            if open_ctrl:
                 replacement += [(XGate(), qr_superpos[:], [])]
 
             if not trim_after_grad_gate:
@@ -475,12 +503,12 @@ class LinComb(CircuitGradient):
             # gradient gate is applied after the original gate in this case
             replacement.append((gate, gate_qubits, []))
             replacement.append((grad_gate, qr_superpos[:] + gate_qubits, []))
-            if open_control:
+            if open_ctrl:
                 replacement += [(XGate(), qr_superpos[:], [])]
 
         else:
             replacement.append((grad_gate, qr_superpos[:] + gate_qubits, []))
-            if open_control:
+            if open_ctrl:
                 replacement += [(XGate(), qr_superpos[:], [])]
             if not trim_after_grad_gate:
                 replacement.append((gate, gate_qubits, []))
@@ -520,6 +548,9 @@ class LinComb(CircuitGradient):
             state_op: The operator representing the quantum state for which we compute the gradient.
             meas_op: The operator representing the observable for which we compute the gradient.
             target_params: The parameters we are taking the gradient wrt: ω
+            open_ctrl: If True use an open control for ``grad_gate`` instead of closed.
+            trim_after_grad_gate: If True remove all gates after the ``grad_gate``. Can
+                be used to reduce the circuit depth in e.g. computing an overlap of gradients.
 
         Returns:
             ListOp of StateFns as quantum circuits which are the states w.r.t. which we compute the
@@ -605,28 +636,6 @@ class LinComb(CircuitGradient):
             AquaError: If one of the circuits could not be constructed.
             TypeError: If ``operator`` is of unsupported type.
         """
-        state_qc = deepcopy(state_op.primitive)
-        # if isinstance(target_params, list) and isinstance(target_params[0], tuple):
-        #     tuples_list = deepcopy(target_params)
-        #     target_params = []
-        #     for tuples in tuples_list:
-        #         if all([param in state_qc._parameter_table.get_keys() for param in tuples]):
-        #             for param in tuples:
-        #                 if param not in target_params:
-        #                     target_params.append(param)
-        # elif isinstance(target_params, tuple):
-        #     tuples_list = deepcopy([target_params])
-        #     target_params = []
-        #     for tuples in tuples_list:
-        #         if all([param in state_qc._parameter_table.get_keys() for param in tuples]):
-        #             for param in tuples:
-        #                 if param not in target_params:
-        #                     target_params.append(param)
-        # else:
-        #     raise TypeError(
-        #         'Please define in the parameters for which the Hessian is evaluated either '
-        #         'as parameter tuple or a list of parameter tuples')
-
         if not isinstance(target_params, list):
             target_params = [target_params]
 
@@ -691,7 +700,7 @@ class LinComb(CircuitGradient):
                                 # Chain Rule Parameter Expression
                                 param_grad = 1
                                 for gate, idx, param in zip(
-                                    [gate_a, gate_b], [idx_a, idx_b], [param_a, param_b]
+                                        [gate_a, gate_b], [idx_a, idx_b], [param_a, param_b]
                                 ):
                                     param_expression = gate.params[idx]
                                     if param_expression != param:  # need to apply chain rule
